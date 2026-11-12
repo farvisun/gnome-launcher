@@ -1,13 +1,19 @@
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
+import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {changedBindings, shouldRestore} from './shortcuts.js';
 
 const APP = 'io.github.gnomelauncher.Launcher';
 const PATH = '/io/github/gnomelauncher/Launcher';
+// Open animation, run on the compositor so the GTK client never redraws for it.
+const OPEN_MS = 160;
+const OPEN_SCALE = 0.965;
+const OPEN_LIFT = -8;
 
 export default class Lumen extends Extension {
     enable() {
@@ -22,6 +28,15 @@ export default class Lumen extends Extension {
         // Filter by the resident process before the dock can create its icon.
         this._injections.overrideMethod(Shell.AppSystem.prototype, 'get_running', original => function (...args) {
             return original.apply(this, args).filter(app => lumen._showInDock(app));
+        });
+        // The default map effect zooms a window up from its bottom edge, which
+        // reads as a jump for a palette. Skip it; _animateIn plays instead.
+        this._injections.overrideMethod(Main.wm, '_shouldAnimateActor', original => function (actor, types) {
+            if (lumen._isLauncher(actor?.meta_window)) {
+                this._skippedActors?.delete(actor);
+                return false;
+            }
+            return original.call(this, actor, types);
         });
         this._ownerWatch = Gio.bus_watch_name_on_connection(Gio.DBus.session, APP, Gio.BusNameWatcherFlags.NONE,
             (_connection, _name, owner) => {
@@ -41,10 +56,29 @@ export default class Lumen extends Extension {
         this._map = global.window_manager.connect('map', (_wm, actor) => {
             if (this._isLauncher(actor.meta_window)) {
                 this._hideFromDock(actor.meta_window);
+                // Center before the first frame so the palette never appears
+                // elsewhere and jumps; the idle pass catches a late resize.
+                this._position(actor.meta_window);
+                this._animateIn(actor);
                 this._later(() => this._position(actor.meta_window));
             }
         });
         for (const window of global.display.list_all_windows()) this._hideFromDock(window);
+    }
+    _animateIn(actor) {
+        actor.remove_all_transitions();
+        if (!St.Settings.get().enable_animations) return;
+        actor.set_pivot_point(0.5, 0.5);
+        actor.set({opacity: 0, scale_x: OPEN_SCALE, scale_y: OPEN_SCALE, translation_y: OPEN_LIFT});
+        actor.ease({
+            opacity: 255, scale_x: 1, scale_y: 1, translation_y: 0,
+            duration: OPEN_MS,
+            mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+            onStopped: () => {
+                actor.set_pivot_point(0, 0);
+                actor.set({opacity: 255, scale_x: 1, scale_y: 1, translation_y: 0});
+            },
+        });
     }
     _isLauncher(window) {
         // GTK's application ID can arrive after the map signal on a live desktop.

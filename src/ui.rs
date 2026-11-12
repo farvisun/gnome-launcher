@@ -8,7 +8,7 @@ use crate::{
     },
     files,
     model::{self, Item, Kind},
-    store::{self, Store},
+    store::{self, ResultOrder, Store},
 };
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -79,6 +79,8 @@ pub struct Ui {
     view: RefCell<Value>,
     form: RefCell<Vec<(String, gtk::Widget, bool)>>,
     pub(super) settings_window: RefCell<Option<adw::PreferencesWindow>>,
+    /// Running close fade; reopening cancels it instead of waiting.
+    closing: RefCell<Option<adw::TimedAnimation>>,
     _hold: gio::ApplicationHoldGuard,
 }
 
@@ -165,7 +167,10 @@ impl Ui {
             .default_width(720)
             .default_height(480)
             .resizable(false)
-            .decorated(false)
+            // Client-side decorations give the palette a real compositor shadow
+            // and transparent rounded corners; the shadow stays outside both the
+            // input region and the frame rect the Shell centers.
+            .decorated(true)
             .build();
         window.add_css_class("palette");
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -290,6 +295,7 @@ impl Ui {
             view: RefCell::new(Value::Null),
             form: RefCell::default(),
             settings_window: RefCell::default(),
+            closing: RefCell::default(),
             _hold: app.hold(),
         });
         let weak = Rc::downgrade(&ui);
@@ -429,6 +435,10 @@ impl Ui {
     }
     fn show(self: &Rc<Self>) {
         let start = Instant::now();
+        if let Some(fade) = self.closing.borrow_mut().take() {
+            fade.pause();
+        }
+        self.window.set_opacity(1.);
         self.back();
         self.window.present();
         self.entry.grab_focus();
@@ -440,11 +450,17 @@ impl Ui {
         }
     }
     fn toggle(self: &Rc<Self>) {
-        if self.window.is_visible() {
+        if self.window.is_visible() && !self.is_closing() {
             self.hide();
         } else {
             self.show();
         }
+    }
+    fn is_closing(&self) -> bool {
+        self.closing
+            .borrow()
+            .as_ref()
+            .is_some_and(|fade| fade.state() == adw::AnimationState::Playing)
     }
     fn cancel(&self) {
         if let Some(cancel) = self.file_cancel.borrow_mut().take() {
@@ -458,10 +474,32 @@ impl Ui {
         }
         self.generation.set(self.generation.get().wrapping_add(1));
     }
+    /// Fade out briefly, then unmap. The Shell side animates opening on the
+    /// compositor; a Wayland client must animate its own close before unmapping.
+    /// TimedAnimation skips straight to the end when animations are disabled.
     fn hide(&self) {
         self.cancel();
         self.action_button.popdown();
-        self.window.set_visible(false);
+        if !self.window.is_visible() || self.is_closing() {
+            return;
+        }
+        let fade = adw::TimedAnimation::builder()
+            .widget(&self.window)
+            .value_from(self.window.opacity())
+            .value_to(0.)
+            .duration(110)
+            .easing(adw::Easing::EaseInQuad)
+            .target(&adw::PropertyAnimationTarget::new(&self.window, "opacity"))
+            .build();
+        let window = self.window.downgrade();
+        fade.connect_done(move |_| {
+            if let Some(window) = window.upgrade() {
+                window.set_visible(false);
+                window.set_opacity(1.);
+            }
+        });
+        *self.closing.borrow_mut() = Some(fade.clone());
+        fade.play();
     }
     fn back(self: &Rc<Self>) {
         self.cancel();
@@ -626,11 +664,20 @@ impl Ui {
         } else {
             RESULT_LIMIT
         };
+        // Apps-first also wins the result limit, so a strong file match never
+        // pushes a weaker app match out of the list.
+        let apps_first = !query.is_empty() && state.result_order == ResultOrder::AppsFirst;
+        fn rank<'a>(x: &(u32, bool, u32, &'a Candidate)) -> model::Rank<'a> {
+            model::Rank {
+                score: x.0,
+                favorite: x.1,
+                usage: x.2,
+                app: matches!(x.3.item.kind, Kind::App(_)),
+                title: &x.3.title,
+            }
+        }
         let order = |a: &(u32, bool, u32, &Candidate), b: &(u32, bool, u32, &Candidate)| {
-            b.0.cmp(&a.0)
-                .then(b.1.cmp(&a.1))
-                .then(b.2.cmp(&a.2))
-                .then_with(|| a.3.title.cmp(&b.3.title))
+            model::compare(&rank(a), &rank(b), apps_first)
         };
         if scored.len() > limit {
             scored.select_nth_unstable_by(limit - 1, order);
@@ -1057,28 +1104,31 @@ impl Ui {
         *self.command_cancel.borrow_mut() = Some(cancel.clone());
         let runtime = self.runtime.clone();
         let method = method.to_owned();
-        let (tx, rx) = mpsc::channel();
+        // The worker wakes the main loop only when it has an event, instead of
+        // the UI polling a channel every 12 ms until the command finishes.
+        let (tx, mut rx) = futures_channel::mpsc::unbounded();
         self.status.set_label("Running command…");
         std::thread::spawn(move || {
             let events = tx.clone();
             let result = runtime.request(&ext, &method, params, cancel, |event| {
-                let _ = events.send(Ok((false, event)));
+                let _ = events.unbounded_send(Ok((false, event)));
             });
-            let _ = tx.send(
+            let _ = tx.unbounded_send(
                 result
                     .map(|view| (true, json!({"type":"view","view":view})))
                     .map_err(|e| e.to_string()),
             );
         });
         let weak = Rc::downgrade(self);
-        glib::timeout_add_local(Duration::from_millis(12), move || {
-            let Some(ui) = weak.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
-            if ui.generation.get() != generation {
-                return glib::ControlFlow::Break;
-            }
-            for event in rx.try_iter() {
+        glib::spawn_future_local(async move {
+            use futures_util::StreamExt;
+            while let Some(event) = rx.next().await {
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                if ui.generation.get() != generation {
+                    return;
+                }
                 match event {
                     Ok((done, event)) => {
                         if event["type"] == "view" && !event["view"].is_null() {
@@ -1088,16 +1138,15 @@ impl Ui {
                         }
                         if done {
                             ui.status.set_label("Esc to go back");
-                            return glib::ControlFlow::Break;
+                            return;
                         }
                     }
                     Err(e) => {
                         ui.status.set_label(&format!("Extension: {e}"));
-                        return glib::ControlFlow::Break;
+                        return;
                     }
                 }
             }
-            glib::ControlFlow::Continue
         });
     }
     fn effect(&self, event: &Value) {

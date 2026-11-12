@@ -2,12 +2,38 @@
    system accent all follow the desktop. */
 
 window.palette {
-  border-radius: 16px;
+  border-radius: 18px;
   background-color: var(--window-bg-color);
 }
+/* GTK draws this shadow outside the frame rect, so it never takes input or
+   shifts the Shell's centering. A hairline ring separates the palette from
+   white windows; the layered shadows give depth without a heavy halo. */
+window.palette.csd {
+  box-shadow:
+    0 0 0 1px alpha(black, 0.09),
+    0 1px 2px alpha(black, 0.06),
+    0 8px 18px -2px alpha(black, 0.12),
+    0 22px 48px -6px alpha(black, 0.20);
+}
+window.palette.csd:backdrop {
+  box-shadow:
+    0 0 0 1px alpha(black, 0.09),
+    0 1px 2px alpha(black, 0.06),
+    0 8px 18px -2px alpha(black, 0.10),
+    0 22px 48px -6px alpha(black, 0.16);
+}
+@media (prefers-color-scheme: dark) {
+  window.palette.csd,
+  window.palette.csd:backdrop {
+    box-shadow:
+      0 0 0 1px alpha(black, 0.55),
+      inset 0 0 0 1px alpha(white, 0.07),
+      0 8px 18px -2px alpha(black, 0.30),
+      0 22px 48px -6px alpha(black, 0.42);
+  }
+}
 window.palette > contents {
-  border-radius: 16px;
-  border: 1px solid alpha(currentColor, 0.1);
+  border-radius: 18px;
 }
 window.palette separator {
   background-color: alpha(currentColor, 0.07);
@@ -73,7 +99,8 @@ button.scope:hover {
   margin: 1px 0;
   min-height: 40px;
   border-radius: 10px;
-  transition: background-color 120ms ease-out;
+  /* Only colour animates: no layout or size work while moving the selection. */
+  transition: background-color 140ms cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 .results > row.result-row:hover {
   background-color: alpha(currentColor, 0.04);
@@ -152,6 +179,7 @@ image.favorite {
   font-size: 12px;
   background-color: alpha(currentColor, 0.025);
   border-top: 1px solid alpha(currentColor, 0.07);
+  border-radius: 0 0 18px 18px;
 }
 .footer separator {
   margin: 6px 0;

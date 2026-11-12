@@ -16,6 +16,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 libloading = "0.8"
 libc = "0.2"
+futures-channel = "0.3"
+futures-util = { version = "0.3", default-features = false }
 flate2 = "1"
 tar = "0.4"
 ureq = "3"

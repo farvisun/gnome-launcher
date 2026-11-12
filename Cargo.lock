@@ -375,6 +375,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "flate2",
+ "futures-channel",
+ "futures-util",
  "gtk4",
  "libadwaita",
  "libc",

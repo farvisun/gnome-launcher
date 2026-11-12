@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag matching the version in Cargo.toml (for example v0.2.0)
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deb:
+    name: Build and publish the Debian package
+    runs-on: ubuntu-latest
+    # Build against the GTK, libadwaita and GNOME Shell that the package targets.
+    container: ubuntu:26.04
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential pkg-config ca-certificates curl git \
+            libgtk-4-dev libadwaita-1-dev libglib2.0-bin python3 gh
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Install Rust
+        run: |
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Check the tag matches Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test "$RELEASE_TAG" = "v$version" || { echo "Tag $RELEASE_TAG does not match Cargo.toml version $version"; exit 1; }
+      - name: Test
+        run: cargo test --release --locked
+      - name: Build package
+        run: |
+          cargo build --release --locked
+          python3 scripts/package-deb.py
+          cd dist && sha256sum *.deb > SHA256SUMS && cat SHA256SUMS
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*.deb dist/SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/*.deb dist/SHA256SUMS --verify-tag \
+              --title "Lumen ${RELEASE_TAG#v}" --generate-notes --latest
+          fi

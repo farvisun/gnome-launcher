@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import tomllib
 
 root = Path(__file__).resolve().parents[1]
 dist = root / 'dist'
@@ -10,7 +11,7 @@ dist.mkdir(exist_ok=True)
 binary = root / 'target/release/gnome-launcher'
 if not binary.exists():
     raise SystemExit('Build first: cargo build --release --locked')
-version = '0.1.0'
+version = tomllib.loads((root / 'Cargo.toml').read_text())['package']['version']
 arch = subprocess.check_output(['dpkg', '--print-architecture'], text=True).strip()
 with tempfile.TemporaryDirectory(prefix='lumen-deb-') as temporary:
     stage = Path(temporary)

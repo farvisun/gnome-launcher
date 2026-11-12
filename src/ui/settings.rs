@@ -143,7 +143,7 @@ impl Ui {
         behavior.add(&history);
         let about = adw::ActionRow::builder()
             .use_markup(false)
-            .title("Lumen 0.1.0")
+            .title(concat!("Lumen ", env!("CARGO_PKG_VERSION")))
             .subtitle("A native command palette for GNOME · No telemetry or cloud account")
             .build();
         behavior.add(&about);

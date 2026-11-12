@@ -31,7 +31,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends build-essential pkg-config ca-certificates curl git \
-            libgtk-4-dev libadwaita-1-dev libglib2.0-bin python3 gh
+            libgtk-4-dev libadwaita-1-dev libglib2.0-bin python3 gh nodejs
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}

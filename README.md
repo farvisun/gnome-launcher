@@ -1,146 +1,117 @@
-# Lumen
-
-[![Website](https://img.shields.io/badge/website-farvisun.github.io%2Fgnome--launcher-2f6fd0)](https://farvisun.github.io/gnome-launcher/)
-[![Release](https://img.shields.io/github/v/release/farvisun/gnome-launcher)](https://github.com/farvisun/gnome-launcher/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+<h1 align="center">Lumen</h1>
 
 <p align="center">
-  <img src="docs/assets/lumen-search-dark.png" alt="Lumen searching applications" width="640">
+  <strong>Everything on your desktop, one keystroke away.<br>A fast, native command launcher for GNOME.</strong>
 </p>
 
-A native command launcher for **Ubuntu 26.04, GNOME 50, and Wayland**. Press **Super+Space** (the Windows/Cmd key + Space), type, and press Enter.
+<p align="center">
+  <a href="https://farvisun.github.io/gnome-launcher/">Website</a> ·
+  <a href="https://github.com/farvisun/gnome-launcher/releases/latest">Download</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#faq">FAQ</a>
+</p>
 
-- Search and launch installed apps, including Flatpak and Snap desktop entries.
-- Search indexed file/folder names and paths; open files, reveal them in Files, or copy paths.
-- Calculate expressions such as `sqrt(144) * 3`, `200 * 15%`, or `2^8`. Enter copies the result.
-- Favorite results and rank suggestions using local usage history.
-- Install JavaScript/TypeScript extensions from a local package or HTTPS URL.
-- Use native extension lists, text details, forms, clipboard actions, and persistent storage.
+<p align="center">
+  <a href="https://github.com/farvisun/gnome-launcher/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/farvisun/gnome-launcher"></a>
+  <img alt="GNOME 50" src="https://img.shields.io/badge/GNOME-50-4a86cf?logo=gnome&logoColor=white">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green">
+</p>
 
-Lumen uses GTK4/libadwaita with a Rust core. A small GNOME Shell extension handles the shortcut, focus, and positioning. **File indexing reuses GNOME LocalSearch**; Lumen does not run another filesystem crawler. Search text is not stored or transmitted. Extension programs can use the network themselves.
+<p align="center">
+  <img src="docs/assets/lumen-search-dark.png" alt="Lumen searching for applications" width="640">
+</p>
 
-## Build
+Press **Super + Space**, type a few letters and press **Enter**. Lumen opens apps and files, does quick maths, and runs commands from extensions. It looks and feels like the rest of GNOME, follows your light or dark style and accent colour, and opens instantly because it stays ready in the background.
 
-Install Rust 1.92 or newer, Node.js 22 or newer, and the native headers:
+## Features
 
-```sh
-sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
-  localsearch libtinysparql-3.0-0 python3-gi
-cargo build --release --locked
-npm ci --ignore-scripts
-```
+- **Apps.** Every installed app, including Flatpak and Snap. Typos and abbreviations still match, and apps you use often rank higher.
+- **Files and folders.** Search names and paths through GNOME's own file index, so there is no second indexer slowing your computer. Open a file, show it in Files or copy its path.
+- **Calculator.** Type `sqrt(144) * 3`, `200 * 15%` or `2^8` and see the answer as you type. Enter copies it.
+- **Favourites.** Pin what you use most with **Ctrl + K**.
+- **Extensions.** Add your own commands, written in JavaScript or TypeScript.
+- **Private.** Your searches are never saved or sent anywhere. No account, no telemetry.
 
-On this Ubuntu machine, the runtime libraries are present. An optional helper downloads and extracts **build headers only** into `.build-deps/`, without root:
+## Install
 
-```sh
-python3 scripts/bootstrap-build.py
-bash -c 'source scripts/dev-env.sh; cargo build --release --locked'
-```
+Lumen is made for **Ubuntu 26.04** with **GNOME 50 on Wayland**.
 
-Keep `Cargo.lock` and `package-lock.json` for reproducible dependency resolution. The local-header helper requires the corresponding Ubuntu runtime libraries; it is not a portable sysroot.
+1. Download `lumen-launcher_0.1.0_amd64.deb` from the [latest release](https://github.com/farvisun/gnome-launcher/releases/latest).
+2. Install it and turn on its GNOME Shell part:
+   ```sh
+   sudo apt install ./lumen-launcher_0.1.0_amd64.deb
+   gnome-extensions enable lumen@gnome-launcher.local
+   ```
+3. **Log out and back in** once. Then press **Super + Space**.
 
-## Install for your user
+> **Note:** Super + Space normally switches keyboard layouts. While Lumen is on, layout switching moves to **Super + Shift + Space**. Your original shortcut comes back if you turn Lumen off.
 
-```sh
-python3 scripts/install.py
-```
-
-This installs the binary, app entry, icon, D-Bus service, session autostart, and Shell integration. **Log out and back in once if GNOME has not discovered the new Shell extension.** On subsequent sessions Lumen stays resident, ready for the shortcut. No reboot is needed.
-
-Super+Space is removed from keyboard-layout switching while the integration is enabled. Forward layout switching moves to **Super+Shift+Space**; the hardware layout key is preserved. Overview shortcuts remain available. Disable/uninstall restores only shortcut values Lumen still owns, preserving later user edits.
-
-```sh
-~/.local/bin/gnome-launcher --settings
-~/.local/bin/gnome-launcher --quit
-python3 scripts/uninstall.py
-```
-
-Uninstall keeps local preferences and installed extension data. To build a system package instead:
+<details>
+<summary><b>Install from source instead</b></summary>
 
 ```sh
-python3 scripts/package-deb.py
-# Install the resulting dist/lumen-launcher_0.1.0_amd64.deb using your package manager.
-gnome-extensions enable lumen@gnome-launcher.local
+sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev localsearch libtinysparql-3.0-0 python3-gi
+git clone https://github.com/farvisun/gnome-launcher.git
+cd gnome-launcher
+cargo build --release --locked      # needs Rust 1.92 or newer
+python3 scripts/install.py          # installs for your user only, no sudo
 ```
 
-Avoid keeping both a system and per-user installation. Disable the Shell extension before removing a system package to restore its shortcut changes. The `.deb` targets GNOME 50 specifically.
+Log out and back in once. To remove a source install, run `python3 scripts/uninstall.py`. Use either the package or the source install, not both.
+</details>
 
-## Keyboard
+## Using it
 
 | Key | Action |
 | --- | --- |
-| Super+Space | Open or close the palette |
-| Up / Down, Ctrl+N / Ctrl+P | Select a result |
-| Page Up / Page Down | Jump five results |
-| Enter | Open app/file, copy a calculation, or run an extension command |
-| Ctrl+K | Actions for the selected result |
-| Ctrl+, | Settings |
-| Escape | Close actions, return from an extension, clear the query, or hide the palette |
-| Backspace | Return from an extension when the query is empty |
+| **Super + Space** | Open or close Lumen |
+| **↑ / ↓** or **Ctrl + N / P** | Move the selection |
+| **Page Up / Page Down** | Jump five results |
+| **Enter** | Open, copy or run the selected result |
+| **Ctrl + K** | More actions: favourite, show in Files, copy path |
+| **Ctrl + ,** | Settings |
+| **Esc** | Clear the search, go back, then close |
 
-Settings includes a configurable accelerator, history clearing, file-index status, and extension management. File coverage follows GNOME's indexed folders and exclusions. Open **Settings → Files → Open Search Settings** to change those folders. File contents are not searched in this release.
+**Settings** (**Ctrl + ,**) lets you change the shortcut, choose whether applications always come first or results are sorted purely by best match, clear your usage history, check the file index, and manage extensions.
+
+Lumen finds files in the folders GNOME indexes. To add or remove folders, open **Settings → Files → Open Search Settings**. File contents are not searched.
 
 ## Extensions
 
-Extensions are **trusted local programs**, with the same filesystem/network privileges as your user. Review the package source before enabling. Capability declarations govern SDK host methods; they are not an operating-system sandbox. Third-party code runs outside GNOME Shell, with bounded protocol messages, cancellation, and a ten-second request timeout.
+Extensions are small programs that add commands to Lumen. To install one, open **Settings → Extensions**, choose the package, review what it can do, and select **Install & Enable**.
 
-Build the included examples:
+Extensions run with your user's permissions, like any other app you install, so only install ones you trust. Lumen never runs a package's install scripts.
+
+To write your own, see the [extension guide](sdk/README.md) and the examples in `examples/`.
+
+## Privacy
+
+Your searches are not saved or sent anywhere. Lumen keeps only a count of which results you open, so it can rank them higher. That count stays in `~/.local/share/gnome-launcher/`, and **Settings** can clear it. Extensions are separate programs and may use the network themselves.
+
+## FAQ
+
+**Super + Space does nothing.**
+Log out and back in once so GNOME loads Lumen's shell part, and check that it's on with `gnome-extensions info lumen@gnome-launcher.local`. You can also open Lumen from the Applications menu.
+
+**A file I expect isn't found.**
+Lumen uses GNOME's file index. Make sure the folder is included in **Settings → Search → Search Locations**, and give the indexer a few minutes after adding it.
+
+**How do I change the shortcut?**
+Open **Settings** (**Ctrl + ,**) and enter a new one, such as `<Super>space` or `<Control><Alt>space`.
+
+**How do I uninstall it?**
+Run `gnome-extensions disable lumen@gnome-launcher.local` first, so your keyboard-layout shortcut is restored, then `sudo apt remove lumen-launcher`.
+
+## Development
 
 ```sh
-npm run bundle:examples
-target/release/gnome-launcher pack dist/quick-links dist/quick-links.lumen-extension
-target/release/gnome-launcher pack dist/scratchpad dist/scratchpad.lumen-extension
-```
-
-Open **Settings → Extensions**, choose a package, select Review, then Install & Enable. Quick Links demonstrates searchable lists and multiple actions; Scratchpad demonstrates forms, notifications, clipboard access, and storage. Packages are gzip tar archives with `extension.json` at their root. Installation never executes package scripts. Updates require explicitly reviewing and replacing an installed package.
-
-For local development, load the project folder from Settings or run:
-
-```sh
-target/release/gnome-launcher dev examples/quick-links
-# Reopen Settings to refresh developer registrations.
-```
-
-See [the extension SDK](sdk/README.md) for authoring, TypeScript bundling, and the protocol. There is no hosted marketplace or Raycast SDK compatibility in this release.
-
-## Validate
-
-```sh
-cargo fmt --check
-cargo clippy --locked --all-targets -- -D warnings
+cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-npm test
-glib-compile-schemas --strict shell/schemas
-desktop-file-validate data/io.github.gnomelauncher.Launcher.desktop
+npm ci --ignore-scripts && npm test       # extension SDK
+python3 tests/shell-smoke.py              # private, headless GNOME Shell check
 ```
 
-With a running GNOME display and LocalSearch session:
-
-```sh
-GTK_IM_MODULE=gtk-im-context-simple LUMEN_SCREENSHOT=dist/screenshots \
-  cargo test --locked -- --ignored --nocapture --test-threads=1
-python3 tests/shell-smoke.py
-```
-
-The native test exercises searching, stale-query cancellation, settings, and extension views; `LUMEN_SCREENSHOT=DIR` saves GTK-only light and dark renders of several views into `DIR`. `GTK_IM_MODULE=gtk-im-context-simple` avoids a crash in GTK's Wayland input-method module when the test destroys windows. The Shell smoke test creates a private D-Bus session and headless Wayland compositor, verifies activation and shortcut migration/restoration, and leaves the live desktop settings alone. It requires GNOME's normal graphics/runtime dependencies. Details go to `dist/shell-smoke.log`.
-
-Use a separate test data directory when validating destructive extension-management flows. Manual checks still needed on each supported desktop setup: real keyboard activation, multi-monitor placement, mixed scaling, screen readers, opening external apps/files, and package review/replace/remove.
-
-## Diagnostics and performance
-
-```sh
-gnome-launcher doctor
-gnome-launcher search 'report'
-LUMEN_PROFILE=1 gnome-launcher --background
-```
-
-Profiling logs report application-side presentation and file-query times; they do not measure compositor-to-screen latency. Targets are warm activation within 150 ms and indexed results within 200 ms on the development machine. Queries are debounced for 60 ms, capped at 40 file results, and cancelled when superseded. The LocalSearch connection is reused across queries, and the app catalog is lowercased once rather than per keystroke. Extension subprocesses start on demand and are reaped after 60–90 seconds idle. A 30-second timer checks idle processes; extension-request polling exists only while a request is pending; file results are awaited without polling.
-
-Validated on GNOME 50.1 / Ubuntu 26.04: the isolated compositor delivered Super+Space and reopened the palette in approximately 4 ms of application work (first presentation approximately 224 ms). Live LocalSearch queries over roughly 33,000 indexed files took 90–100 ms before debounce. The installed hidden process used approximately 46 MiB RSS / 13 MiB PSS and accumulated zero CPU ticks during a 1.2-second idle sample. These are development measurements, not guarantees for other machines.
-
-Per-user installation logs: `$XDG_DATA_HOME/gnome-launcher.log` (normally `~/.local/share/gnome-launcher.log`). Preferences, usage counts, extension storage, and packages live under `$XDG_DATA_HOME/gnome-launcher/`. To select a specific Node executable, set `LUMEN_NODE` in the launcher's session environment.
-
-The first version does not include clipboard history, snippets, window-management commands, full-text search, or cloud services.
+`gnome-launcher doctor` prints a health check, and `LUMEN_PROFILE=1 gnome-launcher --background` logs timings. Logs go to `~/.local/share/gnome-launcher.log`. To build the Debian package, run `python3 scripts/package-deb.py`.
 
 ## License
 

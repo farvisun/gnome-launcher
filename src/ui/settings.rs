@@ -148,6 +148,38 @@ impl Ui {
             .build();
         behavior.add(&about);
         general.add(&behavior);
+        let results = adw::PreferencesGroup::builder()
+            .title("Search results")
+            .description("Choose which results lead when apps, files and commands all match.")
+            .build();
+        let orders = [ResultOrder::AppsFirst, ResultOrder::Relevance];
+        let order = adw::ComboRow::builder()
+            .title("Result order")
+            .subtitle("Applications first keeps apps at the top of every search.")
+            .model(&gtk::StringList::new(&["Applications first", "Best match first"]))
+            .build();
+        let current = self.state.borrow().result_order;
+        order.set_selected(orders.iter().position(|o| *o == current).unwrap_or(0) as u32);
+        let weak = Rc::downgrade(self);
+        order.connect_selected_notify(move |row| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let chosen = orders
+                .get(row.selected() as usize)
+                .copied()
+                .unwrap_or_default();
+            if ui.state.borrow().result_order == chosen {
+                return;
+            }
+            ui.state.borrow_mut().result_order = chosen;
+            ui.persist();
+            if ui.active.borrow().is_none() {
+                ui.render_search();
+            }
+        });
+        results.add(&order);
+        general.add(&results);
         window.add(&general);
 
         let files_page = adw::PreferencesPage::builder()

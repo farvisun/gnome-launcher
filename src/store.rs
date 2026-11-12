@@ -14,6 +14,17 @@ pub fn data_dir() -> PathBuf {
         .join("gnome-launcher")
 }
 
+/// How search results are grouped when several providers match.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResultOrder {
+    /// Applications always lead; other sections follow by best match.
+    #[default]
+    AppsFirst,
+    /// Every section is ordered by its best match.
+    Relevance,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Store {
@@ -21,6 +32,7 @@ pub struct Store {
     pub favorites: BTreeSet<String>,
     pub disabled: BTreeSet<String>,
     pub developers: BTreeSet<PathBuf>,
+    pub result_order: ResultOrder,
 }
 impl Store {
     pub fn load() -> Self {
@@ -78,4 +90,19 @@ pub fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
     file.sync_all()?;
     fs::rename(tmp, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+    #[test]
+    fn result_order_defaults_to_apps_first_and_round_trips() {
+        let old: Store = serde_json::from_str(r#"{"usage":{}}"#).unwrap();
+        assert_eq!(old.result_order, ResultOrder::AppsFirst);
+        let store = Store { result_order: ResultOrder::Relevance, ..Default::default() };
+        let text = serde_json::to_string(&store).unwrap();
+        assert!(text.contains(r#""result_order":"relevance""#));
+        let back: Store = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.result_order, ResultOrder::Relevance);
+    }
 }

@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=io.github.gnomelauncher.Launcher
+Exec=gnome-launcher --background

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.lumen" path="/org/gnome/shell/extensions/lumen/">
+    <key name="toggle-lumen" type="as">
+      <default>['&lt;Super&gt;space']</default>
+      <summary>Toggle the Lumen launcher</summary>
+    </key>
+    <key name="shortcut-backup" type="s">
+      <default>''</default>
+      <summary>Original and installed shortcut values for conditional restoration</summary>
+    </key>
+  </schema>
+</schemalist>

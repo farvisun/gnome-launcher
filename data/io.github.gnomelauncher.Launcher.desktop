@@ -1,0 +1,16 @@
+[Desktop Entry]
+Name=Lumen
+Comment=Search apps, files, calculations, and extension commands
+Exec=gnome-launcher
+Icon=io.github.gnomelauncher.Launcher
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=launcher;search;calculator;commands;
+StartupNotify=true
+StartupWMClass=io.github.gnomelauncher.Launcher
+Actions=Settings;
+
+[Desktop Action Settings]
+Name=Settings
+Exec=gnome-launcher --settings

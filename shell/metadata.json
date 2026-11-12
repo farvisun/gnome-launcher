@@ -1,0 +1,8 @@
+{
+  "uuid": "lumen@gnome-launcher.local",
+  "name": "Lumen Launcher",
+  "description": "Super+Space command launcher with native application and file search",
+  "shell-version": ["50"],
+  "settings-schema": "org.gnome.shell.extensions.lumen",
+  "version": 1
+}

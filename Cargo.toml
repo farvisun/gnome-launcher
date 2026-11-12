@@ -1,0 +1,29 @@
+[package]
+name = "gnome-launcher"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Lumen: a native, extensible command launcher for GNOME"
+license = "MIT"
+repository = "https://github.com/farvisun/gnome-launcher"
+homepage = "https://farvisun.github.io/gnome-launcher/"
+
+[dependencies]
+anyhow = "1"
+gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libloading = "0.8"
+libc = "0.2"
+flate2 = "1"
+tar = "0.4"
+ureq = "3"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true
+

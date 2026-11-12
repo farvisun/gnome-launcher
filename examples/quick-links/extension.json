@@ -1,0 +1,10 @@
+{
+  "id": "quick-links",
+  "name": "Quick Links",
+  "version": "1.0.0",
+  "sdk_version": 1,
+  "entry": "index.mjs",
+  "description": "Search useful GNOME and developer links",
+  "capabilities": ["open", "clipboard"],
+  "commands": [{"id": "links", "title": "Quick Links", "subtitle": "Open GNOME and developer resources", "keywords": ["web", "docs", "browser"]}]
+}

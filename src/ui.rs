@@ -1,0 +1,1471 @@
+mod settings;
+
+use crate::{
+    apps, calculator,
+    extensions::{
+        package::{self, Extension},
+        runtime::Runtime,
+    },
+    files,
+    model::{self, Item, Kind},
+    store::{self, Store},
+};
+use adw::prelude::*;
+use gtk::{gdk, gio, glib};
+use serde_json::{Value, json};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::{Duration, Instant},
+};
+
+const PLACEHOLDER: &str = "Search apps, files, and commands…";
+const SUGGESTION_LIMIT: usize = 12;
+const RESULT_LIMIT: usize = 40;
+const SECTION_LIMIT: usize = 8;
+
+type MenuAction = Box<dyn Fn(&Rc<Ui>)>;
+
+/// A searchable item with its text lowercased once, when the catalog is built.
+struct Candidate {
+    item: Item,
+    title: String,
+    keywords: String,
+}
+impl Candidate {
+    fn new(item: Item) -> Self {
+        Self {
+            title: item.title.to_lowercase(),
+            keywords: item.keywords.to_lowercase(),
+            item,
+        }
+    }
+}
+
+pub struct Ui {
+    app: adw::Application,
+    window: adw::ApplicationWindow,
+    entry: gtk::SearchEntry,
+    list: gtk::ListBox,
+    scroll: gtk::ScrolledWindow,
+    stack: gtk::Stack,
+    detail: gtk::Box,
+    scope: gtk::Button,
+    status: gtk::Label,
+    primary_hint: gtk::Box,
+    primary_label: gtk::Label,
+    action_button: gtk::MenuButton,
+    pub(super) state: RefCell<Store>,
+    apps: RefCell<Vec<Item>>,
+    /// Apps, extension commands and built-ins; rebuilt only when one of them changes.
+    catalog: RefCell<Option<Rc<Vec<Candidate>>>>,
+    pub(super) extensions: RefCell<Vec<Extension>>,
+    pub(super) runtime: Arc<Runtime>,
+    results: RefCell<Vec<Item>>,
+    /// What the visible rows were built from, so identical updates skip a rebuild.
+    rendered: RefCell<(Vec<&'static str>, Vec<bool>)>,
+    file_results: RefCell<Vec<Candidate>>,
+    generation: Cell<u64>,
+    file_cancel: RefCell<Option<gio::Cancellable>>,
+    command_cancel: RefCell<Option<Arc<AtomicBool>>>,
+    debounce: RefCell<Option<glib::SourceId>>,
+    suppress_search: Cell<bool>,
+    active: RefCell<Option<(Extension, String)>>,
+    view: RefCell<Value>,
+    form: RefCell<Vec<(String, gtk::Widget, bool)>>,
+    pub(super) settings_window: RefCell<Option<adw::PreferencesWindow>>,
+    _hold: gio::ApplicationHoldGuard,
+}
+
+pub fn run(args: &[String]) {
+    let app = adw::Application::builder()
+        .application_id(crate::APP_ID)
+        .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
+        .build();
+    let ui: Rc<RefCell<Option<Rc<Ui>>>> = Rc::default();
+    let holder = ui.clone();
+    app.connect_startup(move |app| {
+        let ui = Ui::new(app);
+        *holder.borrow_mut() = Some(ui.clone());
+        for name in ["toggle", "show", "settings", "quit"] {
+            let action = gio::SimpleAction::new(name, None);
+            let ui = Rc::downgrade(&ui);
+            action.connect_activate(move |action, _| {
+                if let Some(ui) = ui.upgrade() {
+                    match action.name().as_str() {
+                        "toggle" => ui.toggle(),
+                        "show" => ui.show(),
+                        "settings" => ui.open_settings(),
+                        "quit" => ui.app.quit(),
+                        _ => {}
+                    }
+                }
+            });
+            app.add_action(&action);
+        }
+    });
+    let holder = ui.clone();
+    app.connect_command_line(move |_, command| {
+        if let Some(ui) = holder.borrow().as_ref() {
+            let args = command.arguments();
+            if args.iter().any(|a| a == "--quit") {
+                ui.app.quit();
+            } else if args.iter().any(|a| a == "--settings") {
+                ui.open_settings();
+            } else if !args.iter().any(|a| a == "--background") {
+                ui.toggle();
+            }
+        }
+        glib::ExitCode::SUCCESS
+    });
+    let holder = ui.clone();
+    app.connect_shutdown(move |_| {
+        if let Some(ui) = holder.borrow().as_ref() {
+            ui.cancel();
+            ui.runtime.shutdown();
+        }
+    });
+    app.run_with_args(args);
+}
+
+/// A key hint such as `[↵] Open`, drawn as a small keycap and a dim label.
+fn key_hint(keys: &[&str], label: &str) -> (gtk::Box, gtk::Label) {
+    let hint = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    hint.add_css_class("key-hint");
+    hint.set_valign(gtk::Align::Center);
+    for key in keys {
+        let cap = gtk::Label::new(Some(key));
+        cap.add_css_class("keycap");
+        cap.set_valign(gtk::Align::Center);
+        hint.append(&cap);
+    }
+    let text = gtk::Label::new(Some(label));
+    text.set_margin_start(2);
+    hint.append(&text);
+    (hint, text)
+}
+
+impl Ui {
+    fn new(app: &adw::Application) -> Rc<Self> {
+        let css = gtk::CssProvider::new();
+        css.load_from_string(include_str!("../data/style.css"));
+        gtk::style_context_add_provider_for_display(
+            &gdk::Display::default().expect("A desktop display is required"),
+            &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        let window = adw::ApplicationWindow::builder()
+            .application(app)
+            .title("Lumen Launcher")
+            .default_width(720)
+            .default_height(480)
+            .resizable(false)
+            .decorated(false)
+            .build();
+        window.add_css_class("palette");
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let top = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        top.add_css_class("search-bar");
+        let scope = gtk::Button::builder()
+            .visible(false)
+            .valign(gtk::Align::Center)
+            .tooltip_text("Back (Esc)")
+            .build();
+        scope.add_css_class("scope");
+        top.append(&scope);
+        let entry = gtk::SearchEntry::builder()
+            .placeholder_text(PLACEHOLDER)
+            .hexpand(true)
+            .build();
+        entry.add_css_class("palette-search");
+        entry.set_tooltip_text(Some("Search apps, files, commands, or enter a calculation"));
+        top.append(&entry);
+        let settings_button = gtk::Button::from_icon_name("emblem-system-symbolic");
+        settings_button.add_css_class("flat");
+        settings_button.add_css_class("circular");
+        settings_button.set_valign(gtk::Align::Center);
+        settings_button.set_tooltip_text(Some("Settings (Ctrl+,)"));
+        top.append(&settings_button);
+        root.append(&top);
+        root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        let list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::Single)
+            .activate_on_single_click(true)
+            .build();
+        list.add_css_class("results");
+        list.set_header_func(|row, previous| {
+            let name = row.widget_name();
+            if let Some(section) = name.strip_prefix("section:")
+                && previous.is_none_or(|before| before.widget_name() != name)
+            {
+                let label = gtk::Label::builder().label(section).xalign(0.).build();
+                label.add_css_class("section-label");
+                row.set_header(Some(&label));
+            } else {
+                row.set_header(None::<&gtk::Widget>);
+            }
+        });
+        let scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&list)
+            .build();
+        let detail = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        detail.add_css_class("detail");
+        let detail_scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&detail)
+            .build();
+        let stack = gtk::Stack::new();
+        stack.set_vexpand(true);
+        stack.add_named(&scroll, Some("results"));
+        stack.add_named(&detail_scroll, Some("detail"));
+        root.append(&stack);
+        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 14);
+        footer.add_css_class("footer");
+        let brand = gtk::Image::from_icon_name("io.github.gnomelauncher.Launcher");
+        brand.set_pixel_size(16);
+        brand.add_css_class("brand");
+        footer.append(&brand);
+        let status = gtk::Label::builder()
+            .label("")
+            .hexpand(true)
+            .xalign(0.)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        status.add_css_class("status");
+        footer.append(&status);
+        let (primary_hint, primary_label) = key_hint(&["↵"], "Open");
+        // The divider belongs to the hint so both hide when Enter does nothing.
+        let divider = gtk::Separator::new(gtk::Orientation::Vertical);
+        divider.set_margin_start(10);
+        primary_hint.append(&divider);
+        footer.append(&primary_hint);
+        let (actions_hint, _) = key_hint(&["Ctrl", "K"], "Actions");
+        let action_button = gtk::MenuButton::builder()
+            .child(&actions_hint)
+            .always_show_arrow(false)
+            .tooltip_text("Actions for the selected result")
+            .build();
+        action_button.add_css_class("flat");
+        action_button.add_css_class("actions-button");
+        footer.append(&action_button);
+        root.append(&footer);
+        window.set_content(Some(&root));
+        let state = Store::load();
+        let extensions = package::discover(&state);
+        let ui = Rc::new(Self {
+            app: app.clone(),
+            window,
+            entry,
+            list,
+            scroll,
+            stack,
+            detail,
+            scope,
+            status,
+            primary_hint,
+            primary_label,
+            action_button,
+            apps: RefCell::new(apps::installed()),
+            catalog: RefCell::default(),
+            extensions: RefCell::new(extensions),
+            state: RefCell::new(state),
+            runtime: Arc::default(),
+            results: RefCell::default(),
+            rendered: RefCell::default(),
+            file_results: RefCell::default(),
+            generation: Cell::new(0),
+            file_cancel: RefCell::default(),
+            command_cancel: RefCell::default(),
+            debounce: RefCell::default(),
+            suppress_search: Cell::new(false),
+            active: RefCell::default(),
+            view: RefCell::new(Value::Null),
+            form: RefCell::default(),
+            settings_window: RefCell::default(),
+            _hold: app.hold(),
+        });
+        let weak = Rc::downgrade(&ui);
+        settings_button.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_settings();
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.scope.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.back();
+                ui.entry.grab_focus();
+            }
+        });
+        // Build the menu when it opens instead of on every selection change.
+        let weak = Rc::downgrade(&ui);
+        ui.action_button.set_create_popup_func(move |button| {
+            if let Some(ui) = weak.upgrade() {
+                button.set_popover(Some(&ui.build_actions()));
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.entry.connect_changed(move |_| {
+            if let Some(ui) = weak.upgrade()
+                && !ui.suppress_search.get()
+            {
+                ui.search_changed();
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.entry.connect_activate(move |_| {
+            if let Some(ui) = weak.upgrade()
+                && ui.stack.visible_child_name().as_deref() == Some("results")
+                && let Some(row) = ui.list.selected_row()
+            {
+                ui.activate(row.index() as usize);
+            }
+        });
+        ui.entry.set_search_delay(0);
+        let weak = Rc::downgrade(&ui);
+        ui.list.connect_row_activated(move |_, row| {
+            if let Some(ui) = weak.upgrade() {
+                ui.activate(row.index() as usize);
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.list.connect_row_selected(move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.update_hints();
+            }
+        });
+        let key = gtk::EventControllerKey::new();
+        key.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(&ui);
+        key.connect_key_pressed(move |_, key, _, mods| {
+            let Some(ui) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let results = ui.stack.visible_child_name().as_deref() == Some("results");
+            let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
+            match key {
+                gdk::Key::Escape => {
+                    if ui.action_button.is_active() {
+                        ui.action_button.popdown();
+                    } else if ui.active.borrow().is_some() {
+                        ui.back();
+                    } else if !ui.entry.text().is_empty() {
+                        ui.entry.set_text("");
+                    } else {
+                        ui.hide();
+                    }
+                }
+                gdk::Key::BackSpace
+                    if ui.active.borrow().is_some()
+                        && ui.entry.text().is_empty()
+                        && ui.entry.has_focus() =>
+                {
+                    ui.back()
+                }
+                gdk::Key::Down | gdk::Key::KP_Down if results => ui.move_selection(1),
+                gdk::Key::Up | gdk::Key::KP_Up if results => ui.move_selection(-1),
+                gdk::Key::n if ctrl && results => ui.move_selection(1),
+                gdk::Key::p if ctrl && results => ui.move_selection(-1),
+                gdk::Key::Page_Down if results => ui.move_selection(5),
+                gdk::Key::Page_Up if results => ui.move_selection(-5),
+                gdk::Key::k if ctrl => ui.action_button.popup(),
+                gdk::Key::comma if ctrl => ui.open_settings(),
+                _ => return glib::Propagation::Proceed,
+            }
+            glib::Propagation::Stop
+        });
+        ui.window.add_controller(key);
+        let weak = Rc::downgrade(&ui);
+        ui.window.connect_close_request(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.hide();
+            }
+            glib::Propagation::Stop
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.window.connect_is_active_notify(move |window| {
+            if !window.is_active() && window.is_visible() {
+                let weak = weak.clone();
+                glib::timeout_add_local_once(Duration::from_millis(150), move || {
+                    if let Some(ui) = weak.upgrade()
+                        && !ui.window.is_active()
+                        && !ui.action_button.is_active()
+                        && ui
+                            .settings_window
+                            .borrow()
+                            .as_ref()
+                            .is_none_or(|w| !w.is_visible())
+                    {
+                        ui.hide();
+                    }
+                });
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        gio::AppInfoMonitor::get().connect_changed(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                *ui.apps.borrow_mut() = apps::installed();
+                ui.catalog.borrow_mut().take();
+                if ui.active.borrow().is_none() {
+                    ui.render_search();
+                }
+            }
+        });
+        let runtime = ui.runtime.clone();
+        glib::timeout_add_seconds_local(30, move || {
+            runtime.reap();
+            glib::ControlFlow::Continue
+        });
+        ui.render_search();
+        ui
+    }
+    fn show(self: &Rc<Self>) {
+        let start = Instant::now();
+        self.back();
+        self.window.present();
+        self.entry.grab_focus();
+        if std::env::var_os("LUMEN_PROFILE").is_some() {
+            eprintln!(
+                "Lumen present requested in {:.2} ms",
+                start.elapsed().as_secs_f64() * 1000.
+            );
+        }
+    }
+    fn toggle(self: &Rc<Self>) {
+        if self.window.is_visible() {
+            self.hide();
+        } else {
+            self.show();
+        }
+    }
+    fn cancel(&self) {
+        if let Some(cancel) = self.file_cancel.borrow_mut().take() {
+            cancel.cancel();
+        }
+        if let Some(cancel) = self.command_cancel.borrow_mut().take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(source) = self.debounce.borrow_mut().take() {
+            source.remove();
+        }
+        self.generation.set(self.generation.get().wrapping_add(1));
+    }
+    fn hide(&self) {
+        self.cancel();
+        self.action_button.popdown();
+        self.window.set_visible(false);
+    }
+    fn back(self: &Rc<Self>) {
+        self.cancel();
+        self.active.borrow_mut().take();
+        *self.view.borrow_mut() = Value::Null;
+        self.form.borrow_mut().clear();
+        self.stack.set_visible_child_name("results");
+        self.scope.set_visible(false);
+        self.entry.set_placeholder_text(Some(PLACEHOLDER));
+        self.suppress_search.set(true);
+        self.entry.set_text("");
+        self.suppress_search.set(false);
+        self.file_results.borrow_mut().clear();
+        self.render_search();
+    }
+    fn search_changed(self: &Rc<Self>) {
+        self.cancel();
+        if self.active.borrow().is_some() {
+            let weak = Rc::downgrade(self);
+            let source = glib::timeout_add_local_once(Duration::from_millis(100), move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.debounce.borrow_mut().take();
+                    ui.extension_request(
+                        "command.query",
+                        json!({"query":ui.entry.text().as_str()}),
+                    );
+                }
+            });
+            *self.debounce.borrow_mut() = Some(source);
+            return;
+        }
+        let query = self.entry.text().to_string();
+        // Keep file hits that still match while LocalSearch answers the new query,
+        // so the list narrows instead of flickering empty on every keystroke.
+        let needle = query.trim().to_lowercase();
+        self.file_results
+            .borrow_mut()
+            .retain(|c| !needle.is_empty() && c.title.contains(&needle));
+        self.render_search();
+        if needle.is_empty() || query.len() > 256 {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        let source = glib::timeout_add_local_once(Duration::from_millis(60), move || {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            ui.debounce.borrow_mut().take();
+            let generation = ui.generation.get();
+            let cancel = gio::Cancellable::new();
+            *ui.file_cancel.borrow_mut() = Some(cancel.clone());
+            let started = Instant::now();
+            let weak = Rc::downgrade(&ui);
+            // Await the worker instead of polling the main loop for its result.
+            glib::spawn_future_local(async move {
+                let result = gio::spawn_blocking(move || {
+                    files::search(&query, &cancel).map_err(|e| e.to_string())
+                })
+                .await;
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                if ui.generation.get() != generation {
+                    return;
+                }
+                ui.file_cancel.borrow_mut().take();
+                match result {
+                    Ok(Ok(items)) => {
+                        *ui.file_results.borrow_mut() =
+                            items.into_iter().map(Candidate::new).collect();
+                        ui.render_search();
+                        if std::env::var_os("LUMEN_PROFILE").is_some() {
+                            eprintln!(
+                                "Lumen file results: {:.2} ms",
+                                started.elapsed().as_secs_f64() * 1000.
+                            );
+                        }
+                    }
+                    _ => ui
+                        .status
+                        .set_label("File index unavailable · Check Settings"),
+                }
+            });
+        });
+        *self.debounce.borrow_mut() = Some(source);
+    }
+    fn catalog(&self) -> Rc<Vec<Candidate>> {
+        if let Some(catalog) = self.catalog.borrow().as_ref() {
+            return catalog.clone();
+        }
+        let state = self.state.borrow();
+        let mut candidates: Vec<_> = self
+            .apps
+            .borrow()
+            .iter()
+            .cloned()
+            .map(Candidate::new)
+            .collect();
+        for ext in self
+            .extensions
+            .borrow()
+            .iter()
+            .filter(|e| !state.disabled.contains(&e.manifest.id))
+        {
+            for cmd in &ext.manifest.commands {
+                candidates.push(Candidate::new(Item {
+                    id: format!("ext:{}:{}", ext.manifest.id, cmd.id),
+                    title: cmd.title.clone(),
+                    subtitle: if cmd.subtitle.is_empty() {
+                        ext.manifest.name.clone()
+                    } else {
+                        cmd.subtitle.clone()
+                    },
+                    icon: "application-x-addon-symbolic".into(),
+                    keywords: cmd.keywords.join(" "),
+                    kind: Kind::Command {
+                        extension: ext.manifest.id.clone(),
+                        command: cmd.id.clone(),
+                    },
+                }));
+            }
+        }
+        candidates.push(Candidate::new(Item {
+            id: "settings".into(),
+            title: "Lumen Settings".into(),
+            subtitle: "Extensions, keyboard shortcut, and file search".into(),
+            icon: "emblem-system-symbolic".into(),
+            keywords: "preferences extensions install index shortcut".into(),
+            kind: Kind::Settings,
+        }));
+        let catalog = Rc::new(candidates);
+        *self.catalog.borrow_mut() = Some(catalog.clone());
+        catalog
+    }
+    fn render_search(self: &Rc<Self>) {
+        if self.active.borrow().is_some() {
+            return;
+        }
+        let query = self.entry.text();
+        let query = query.trim();
+        let needle = query.to_lowercase();
+        let catalog = self.catalog();
+        let files = self.file_results.borrow();
+        let state = self.state.borrow();
+        // Score by reference; only the few shown items are cloned.
+        let mut scored: Vec<_> = catalog
+            .iter()
+            .chain(files.iter())
+            .filter_map(|c| {
+                model::score(&needle, &c.title, &c.keywords).map(|score| {
+                    (
+                        score,
+                        state.favorites.contains(&c.item.id),
+                        state.usage.get(&c.item.id).copied().unwrap_or(0),
+                        c,
+                    )
+                })
+            })
+            .collect();
+        let limit = if query.is_empty() {
+            SUGGESTION_LIMIT
+        } else {
+            RESULT_LIMIT
+        };
+        let order = |a: &(u32, bool, u32, &Candidate), b: &(u32, bool, u32, &Candidate)| {
+            b.0.cmp(&a.0)
+                .then(b.1.cmp(&a.1))
+                .then(b.2.cmp(&a.2))
+                .then_with(|| a.3.title.cmp(&b.3.title))
+        };
+        if scored.len() > limit {
+            scored.select_nth_unstable_by(limit - 1, order);
+            scored.truncate(limit);
+        }
+        scored.sort_unstable_by(order);
+        // Keep provider sections together, ordered by each section's best match.
+        let mut groups: Vec<(&'static str, Vec<Item>)> = Vec::new();
+        for (_, favorite, _, c) in scored {
+            let name = if query.is_empty() {
+                if favorite { "Favorites" } else { "Suggestions" }
+            } else {
+                section(&c.item.kind)
+            };
+            match groups.iter_mut().find(|(key, _)| *key == name) {
+                Some((_, items)) => items.push(c.item.clone()),
+                None => groups.push((name, vec![c.item.clone()])),
+            }
+        }
+        drop((state, files));
+        // With several providers, cap each one so a long app list cannot push
+        // every file (or command) below the fold.
+        if groups.len() > 1 {
+            for (_, items) in &mut groups {
+                items.truncate(SECTION_LIMIT);
+            }
+        }
+        let (mut sections, mut items): (Vec<_>, Vec<_>) = groups
+            .into_iter()
+            .flat_map(|(name, items)| items.into_iter().map(move |item| (name, item)))
+            .unzip();
+        let mut calc_error = None;
+        match calculator::calculate(query) {
+            Ok(Some(value)) => {
+                sections.insert(0, section(&Kind::Calculation(String::new())));
+                items.insert(
+                    0,
+                    Item {
+                        id: "calculator".into(),
+                        title: value.clone(),
+                        subtitle: format!("= {query}"),
+                        icon: "accessories-calculator-symbolic".into(),
+                        keywords: String::new(),
+                        kind: Kind::Calculation(value),
+                    },
+                )
+            }
+            Err(e)
+                if query.starts_with('=')
+                    || query
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_digit() || "(-+".contains(c)) =>
+            {
+                calc_error = Some(e.to_string())
+            }
+            _ => {}
+        }
+        let count = items.len();
+        self.status.set_label(&match calc_error {
+            Some(e) => e,
+            None if query.is_empty() => "Type to search apps, files and commands".into(),
+            None if count == 0 => String::new(),
+            None if count == 1 => "1 result".into(),
+            None => format!("{count} results"),
+        });
+        self.set_items(items, sections);
+    }
+    fn set_items(self: &Rc<Self>, items: Vec<Item>, sections: Vec<&'static str>) {
+        let favorites: Vec<bool> = {
+            let state = self.state.borrow();
+            items
+                .iter()
+                .map(|i| state.favorites.contains(&i.id))
+                .collect()
+        };
+        // File results often arrive identical to what is already shown; rebuilding
+        // the rows would reload icons and reset hover for nothing.
+        if *self.results.borrow() == items
+            && {
+                let rendered = self.rendered.borrow();
+                rendered.0 == sections && rendered.1 == favorites
+            }
+            && (!items.is_empty() || self.list.row_at_index(0).is_some())
+        {
+            self.update_hints();
+            return;
+        }
+        let selected = self.list.selected_row().and_then(|r| {
+            self.results
+                .borrow()
+                .get(r.index() as usize)
+                .map(|i| i.id.clone())
+        });
+        self.list.remove_all();
+        for (index, item) in items.iter().enumerate() {
+            let row = gtk::ListBoxRow::new();
+            row.add_css_class("result-row");
+            if let Some(name) = sections.get(index) {
+                row.set_widget_name(&format!("section:{name}"));
+            }
+            row.set_child(Some(&result_row(item, favorites[index])));
+            self.list.append(&row);
+        }
+        let empty = items.is_empty();
+        *self.results.borrow_mut() = items;
+        *self.rendered.borrow_mut() = (sections, favorites);
+        if empty {
+            let row = gtk::ListBoxRow::new();
+            row.set_selectable(false);
+            row.set_activatable(false);
+            row.set_child(Some(&self.empty_state()));
+            self.list.append(&row);
+        } else {
+            let index = selected
+                .and_then(|id| self.results.borrow().iter().position(|i| i.id == id))
+                .unwrap_or(0);
+            if let Some(row) = self.list.row_at_index(index as i32) {
+                self.list.select_row(Some(&row));
+                if index == 0 {
+                    self.scroll.vadjustment().set_value(0.);
+                } else {
+                    // Rows have no allocation until the next layout pass.
+                    let weak = Rc::downgrade(self);
+                    glib::idle_add_local_once(move || {
+                        if let Some(ui) = weak.upgrade() {
+                            ui.reveal(&row);
+                        }
+                    });
+                }
+            }
+        }
+        self.update_hints();
+    }
+    fn empty_state(&self) -> gtk::Box {
+        let query = self.entry.text();
+        let empty = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        empty.add_css_class("empty-state");
+        let icon = gtk::Image::from_icon_name("system-search-symbolic");
+        icon.set_pixel_size(48);
+        icon.add_css_class("empty-icon");
+        empty.append(&icon);
+        let title = gtk::Label::builder()
+            .label(if query.trim().is_empty() {
+                "Nothing here yet".to_owned()
+            } else {
+                format!("No results for “{}”", query.trim())
+            })
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .max_width_chars(48)
+            .build();
+        title.add_css_class("empty-title");
+        empty.append(&title);
+        let hint = gtk::Label::new(Some(if self.active.borrow().is_some() {
+            "Try a different search, or press Esc to go back"
+        } else {
+            "Check the spelling, or try an app, file or calculation"
+        }));
+        hint.add_css_class("empty-hint");
+        empty.append(&hint);
+        empty
+    }
+    /// Updates the footer to describe what Enter will do for the selection.
+    fn update_hints(&self) {
+        let verb = self.list.selected_row().and_then(|r| {
+            self.results.borrow().get(r.index() as usize).map(|item| {
+                match (&item.kind, self.active.borrow().is_some()) {
+                    (_, true) => "Select",
+                    (Kind::Calculation(_), _) => "Copy",
+                    (Kind::Command { .. }, _) => "Run",
+                    _ => "Open",
+                }
+            })
+        });
+        let results = self.stack.visible_child_name().as_deref() == Some("results");
+        self.primary_hint.set_visible(verb.is_some() && results);
+        if let Some(verb) = verb {
+            self.primary_label.set_label(verb);
+        }
+    }
+    fn move_selection(&self, delta: i32) {
+        let count = self.results.borrow().len() as i32;
+        if count == 0 {
+            return;
+        }
+        let index = match self.list.selected_row() {
+            None => 0,
+            // Single steps wrap around; page jumps stop at the ends.
+            Some(row) if delta.abs() == 1 => (row.index() + delta).rem_euclid(count),
+            Some(row) => (row.index() + delta).clamp(0, count - 1),
+        };
+        if let Some(row) = self.list.row_at_index(index) {
+            self.list.select_row(Some(&row));
+            // Scroll without moving focus: focusing the row and returning to the
+            // entry would select the whole query, so the next key replaced it.
+            self.reveal(&row);
+        }
+    }
+    fn reveal(&self, row: &gtk::ListBoxRow) {
+        let adjustment = self.scroll.vadjustment();
+        let top_widget = row.header().unwrap_or_else(|| row.clone().upcast());
+        let (Some(top), Some(bottom)) = (
+            top_widget.compute_bounds(&self.list),
+            row.compute_bounds(&self.list),
+        ) else {
+            return;
+        };
+        let start = f64::from(top.y());
+        let end = f64::from(bottom.y() + bottom.height());
+        let page = adjustment.page_size();
+        if start < adjustment.value() {
+            adjustment.set_value(start);
+        } else if end > adjustment.value() + page {
+            adjustment.set_value(end - page + 8.);
+        }
+    }
+    fn activate(self: &Rc<Self>, index: usize) {
+        let Some(item) = self.results.borrow().get(index).cloned() else {
+            return;
+        };
+        if self.active.borrow().is_some() {
+            self.extension_request("command.action", json!({"item":item.id,"action":"primary"}));
+            return;
+        }
+        let result: anyhow::Result<()> = (|| {
+            match &item.kind {
+                Kind::App(id) => {
+                    let app = gio::AppInfo::all()
+                        .into_iter()
+                        .find(|app| app.id().as_deref() == Some(id.as_str()))
+                        .ok_or_else(|| anyhow::anyhow!("Application is no longer installed"))?;
+                    let ctx = gtk::prelude::WidgetExt::display(&self.window).app_launch_context();
+                    app.launch(&[], Some(&ctx))?;
+                    self.hide();
+                }
+                Kind::File(uri) => {
+                    self.open_uri(uri)?;
+                    self.hide();
+                }
+                Kind::Calculation(value) => {
+                    self.window.clipboard().set_text(value);
+                    self.status
+                        .set_label(&format!("Copied {value} to the clipboard"));
+                }
+                Kind::Settings => self.open_settings(),
+                Kind::Command { extension, command } => {
+                    let ext = self
+                        .extensions
+                        .borrow()
+                        .iter()
+                        .find(|e| &e.manifest.id == extension)
+                        .cloned()
+                        .ok_or_else(|| anyhow::anyhow!("Extension is no longer installed"))?;
+                    self.cancel();
+                    self.suppress_search.set(true);
+                    self.entry.set_text("");
+                    self.suppress_search.set(false);
+                    *self.active.borrow_mut() = Some((ext, command.clone()));
+                    self.entry
+                        .set_placeholder_text(Some(&format!("Search {}…", item.title)));
+                    self.scope.set_child(Some(&{
+                        let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                        content.append(&gtk::Image::from_icon_name("go-previous-symbolic"));
+                        content.append(
+                            &gtk::Label::builder()
+                                .label(&item.title)
+                                .ellipsize(gtk::pango::EllipsizeMode::End)
+                                .max_width_chars(22)
+                                .build(),
+                        );
+                        content
+                    }));
+                    self.scope.set_visible(true);
+                    self.extension_request("command.run", json!({"query":""}));
+                }
+            }
+            self.state.borrow_mut().used(&item.id);
+            self.persist();
+            Ok(())
+        })();
+        if let Err(e) = result {
+            self.status.set_label(&format!("{e:#}"));
+        }
+    }
+    fn open_uri(&self, uri: &str) -> anyhow::Result<()> {
+        gio::AppInfo::launch_default_for_uri(
+            uri,
+            Some(&gtk::prelude::WidgetExt::display(&self.window).app_launch_context()),
+        )?;
+        Ok(())
+    }
+    fn persist(&self) {
+        if let Err(e) = self.state.borrow().save() {
+            self.status
+                .set_label(&format!("Cannot save preferences: {e}"));
+        }
+    }
+    pub(super) fn refresh_extensions(self: &Rc<Self>) {
+        *self.extensions.borrow_mut() = package::discover(&self.state.borrow());
+        self.catalog.borrow_mut().take();
+        if self.active.borrow().is_none() {
+            self.render_search();
+        }
+    }
+    fn build_actions(self: &Rc<Self>) -> gtk::Popover {
+        let popover = gtk::Popover::new();
+        popover.add_css_class("menu");
+        popover.add_css_class("actions-menu");
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let add = |label: &str, icon: &str, run: MenuAction| {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+            row.append(&gtk::Image::from_icon_name(icon));
+            row.append(&gtk::Label::builder().label(label).xalign(0.).build());
+            let button = gtk::Button::builder().child(&row).build();
+            button.add_css_class("flat");
+            button.add_css_class("action-item");
+            let weak = Rc::downgrade(self);
+            let pop = popover.downgrade();
+            button.connect_clicked(move |_| {
+                if let Some(pop) = pop.upgrade() {
+                    pop.popdown();
+                }
+                if let Some(ui) = weak.upgrade() {
+                    run(&ui);
+                }
+            });
+            content.append(&button);
+        };
+        let selected = (self.stack.visible_child_name().as_deref() == Some("results"))
+            .then(|| self.list.selected_row())
+            .flatten()
+            .and_then(|r| self.results.borrow().get(r.index() as usize).cloned());
+        if let Some(item) = selected {
+            if self.active.borrow().is_some() {
+                let actions = self.view.borrow()["items"]
+                    .as_array()
+                    .and_then(|items| items.iter().find(|i| i["id"] == item.id))
+                    .and_then(|i| i["actions"].as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                for action in actions.iter().take(12) {
+                    let label = action["title"].as_str().unwrap_or("Action");
+                    let id = action["id"].as_str().unwrap_or("primary").to_owned();
+                    let item_id = item.id.clone();
+                    add(
+                        label,
+                        "media-playback-start-symbolic",
+                        Box::new(move |ui| {
+                            ui.extension_request(
+                                "command.action",
+                                json!({"item":item_id,"action":id}),
+                            )
+                        }),
+                    );
+                }
+            } else {
+                let favorite = self.state.borrow().favorites.contains(&item.id);
+                let id = item.id.clone();
+                add(
+                    if favorite {
+                        "Remove from Favorites"
+                    } else {
+                        "Add to Favorites"
+                    },
+                    if favorite {
+                        "starred-symbolic"
+                    } else {
+                        "non-starred-symbolic"
+                    },
+                    Box::new(move |ui| {
+                        {
+                            let mut state = ui.state.borrow_mut();
+                            if favorite {
+                                state.favorites.remove(&id);
+                            } else {
+                                state.favorites.insert(id.clone());
+                            }
+                        }
+                        ui.persist();
+                        ui.render_search();
+                    }),
+                );
+                if let Kind::File(uri) = item.kind {
+                    let reveal_uri = uri.clone();
+                    add(
+                        "Show in Files",
+                        "folder-open-symbolic",
+                        Box::new(move |ui| {
+                            reveal_in_files(reveal_uri.clone());
+                            ui.hide();
+                        }),
+                    );
+                    add(
+                        "Copy Path",
+                        "edit-copy-symbolic",
+                        Box::new(move |ui| {
+                            if let Some(path) = gio::File::for_uri(&uri).path() {
+                                ui.window.clipboard().set_text(&path.display().to_string());
+                                ui.status.set_label("Copied path to the clipboard");
+                            }
+                        }),
+                    );
+                }
+            }
+            content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        }
+        add(
+            "Settings",
+            "emblem-system-symbolic",
+            Box::new(|ui| ui.open_settings()),
+        );
+        popover.set_child(Some(&content));
+        popover
+    }
+    fn extension_request(self: &Rc<Self>, method: &str, mut params: Value) {
+        let Some((ext, command)) = self.active.borrow().clone() else {
+            return;
+        };
+        self.cancel();
+        let generation = self.generation.get();
+        params["command"] = json!(command);
+        params["query"] = json!(self.entry.text().as_str());
+        let cancel = Arc::new(AtomicBool::new(false));
+        *self.command_cancel.borrow_mut() = Some(cancel.clone());
+        let runtime = self.runtime.clone();
+        let method = method.to_owned();
+        let (tx, rx) = mpsc::channel();
+        self.status.set_label("Running command…");
+        std::thread::spawn(move || {
+            let events = tx.clone();
+            let result = runtime.request(&ext, &method, params, cancel, |event| {
+                let _ = events.send(Ok((false, event)));
+            });
+            let _ = tx.send(
+                result
+                    .map(|view| (true, json!({"type":"view","view":view})))
+                    .map_err(|e| e.to_string()),
+            );
+        });
+        let weak = Rc::downgrade(self);
+        glib::timeout_add_local(Duration::from_millis(12), move || {
+            let Some(ui) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if ui.generation.get() != generation {
+                return glib::ControlFlow::Break;
+            }
+            for event in rx.try_iter() {
+                match event {
+                    Ok((done, event)) => {
+                        if event["type"] == "view" && !event["view"].is_null() {
+                            ui.render_view(event["view"].clone());
+                        } else if event["type"] == "effect" {
+                            ui.effect(&event);
+                        }
+                        if done {
+                            ui.status.set_label("Esc to go back");
+                            return glib::ControlFlow::Break;
+                        }
+                    }
+                    Err(e) => {
+                        ui.status.set_label(&format!("Extension: {e}"));
+                        return glib::ControlFlow::Break;
+                    }
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+    fn effect(&self, event: &Value) {
+        let text = event["text"].as_str().unwrap_or("");
+        match event["method"].as_str() {
+            Some("host.copy") => self.window.clipboard().set_text(text),
+            Some("host.open") => {
+                if let Err(e) = self.open_uri(text) {
+                    self.status.set_label(&e.to_string());
+                }
+            }
+            Some("host.notify") => {
+                let notification = gio::Notification::new("Lumen");
+                notification.set_body(Some(text));
+                self.app.send_notification(None, &notification);
+            }
+            _ => {}
+        }
+    }
+    fn render_view(self: &Rc<Self>, view: Value) {
+        *self.view.borrow_mut() = view.clone();
+        self.form.borrow_mut().clear();
+        match view["type"].as_str() {
+            Some("list") => {
+                let items = view["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .take(100)
+                    .map(|i| Item {
+                        id: i["id"].as_str().unwrap_or("").into(),
+                        title: i["title"].as_str().unwrap_or("").into(),
+                        subtitle: i["subtitle"].as_str().unwrap_or("").into(),
+                        icon: i["icon"]
+                            .as_str()
+                            .unwrap_or("application-x-addon-symbolic")
+                            .into(),
+                        keywords: String::new(),
+                        kind: Kind::Command {
+                            extension: String::new(),
+                            command: String::new(),
+                        },
+                    })
+                    .collect();
+                self.stack.set_visible_child_name("results");
+                self.set_items(items, Vec::new());
+            }
+            Some("detail") | Some("form") => {
+                while let Some(child) = self.detail.first_child() {
+                    self.detail.remove(&child);
+                }
+                let title = gtk::Label::builder()
+                    .label(view["title"].as_str().unwrap_or("Command"))
+                    .xalign(0.)
+                    .wrap(true)
+                    .build();
+                title.add_css_class("title-2");
+                title.add_css_class("detail-title");
+                self.detail.append(&title);
+                if view["type"] == "detail" {
+                    let label = gtk::Label::builder()
+                        .label(view["text"].as_str().unwrap_or(""))
+                        .wrap(true)
+                        .selectable(true)
+                        .xalign(0.)
+                        .yalign(0.)
+                        .build();
+                    label.add_css_class("detail-body");
+                    self.detail.append(&label);
+                } else {
+                    for field in view["fields"].as_array().into_iter().flatten() {
+                        let label = field["label"].as_str().unwrap_or("");
+                        let id = field["id"].as_str().unwrap_or("").to_owned();
+                        let required = field["required"].as_bool().unwrap_or(false);
+                        let widget: gtk::Widget = if field["type"] == "boolean" {
+                            let check = gtk::CheckButton::with_label(label);
+                            check.set_active(field["value"].as_bool().unwrap_or(false));
+                            check.upcast()
+                        } else {
+                            let label_widget =
+                                gtk::Label::builder().label(label).xalign(0.).build();
+                            label_widget.add_css_class("field-label");
+                            self.detail.append(&label_widget);
+                            let entry = gtk::Entry::new();
+                            entry.set_visibility(field["type"] != "password");
+                            entry.set_text(field["value"].as_str().unwrap_or(""));
+                            entry.set_placeholder_text(field["placeholder"].as_str());
+                            entry.set_tooltip_text(Some(label));
+                            entry.upcast()
+                        };
+                        self.detail.append(&widget);
+                        self.form.borrow_mut().push((id, widget, required));
+                    }
+                    let submit =
+                        gtk::Button::with_label(view["submit_label"].as_str().unwrap_or("Submit"));
+                    submit.add_css_class("suggested-action");
+                    submit.add_css_class("pill");
+                    submit.set_halign(gtk::Align::Start);
+                    let weak = Rc::downgrade(self);
+                    submit.connect_clicked(move |_| {
+                        if let Some(ui) = weak.upgrade() {
+                            let mut values = serde_json::Map::new();
+                            for (id, widget, required) in ui.form.borrow().iter() {
+                                if let Some(entry) = widget.downcast_ref::<gtk::Entry>() {
+                                    if *required && entry.text().trim().is_empty() {
+                                        ui.status.set_label("Complete the required fields");
+                                        entry.grab_focus();
+                                        return;
+                                    }
+                                    values.insert(id.clone(), json!(entry.text().as_str()));
+                                } else if let Some(check) =
+                                    widget.downcast_ref::<gtk::CheckButton>()
+                                {
+                                    values.insert(id.clone(), json!(check.is_active()));
+                                }
+                            }
+                            ui.extension_request("command.submit", json!({"values":values}));
+                        }
+                    });
+                    self.detail.append(&submit);
+                }
+                self.stack.set_visible_child_name("detail");
+                self.update_hints();
+            }
+            _ => {}
+        }
+    }
+}
+
+fn section(kind: &Kind) -> &'static str {
+    match kind {
+        Kind::App(_) => "Applications",
+        Kind::File(_) => "Files & folders",
+        Kind::Calculation(_) => "Calculator",
+        Kind::Command { .. } => "Commands",
+        Kind::Settings => "Lumen",
+    }
+}
+
+/// One result: icon, title and subtitle, and a small kind badge on the right.
+fn result_row(item: &Item, favorite: bool) -> gtk::Box {
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    let icon = gio::Icon::for_string(&item.icon)
+        .ok()
+        .map(|i| gtk::Image::from_gicon(&i))
+        .unwrap_or_else(|| gtk::Image::from_icon_name("application-x-executable-symbolic"));
+    if item.icon.ends_with("-symbolic") {
+        // Symbolic glyphs sit on a soft tile so they line up with full-colour app icons.
+        icon.set_pixel_size(16);
+        icon.add_css_class("symbolic-tile");
+    } else {
+        icon.set_pixel_size(32);
+    }
+    icon.set_valign(gtk::Align::Center);
+    content.append(&icon);
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    text.set_hexpand(true);
+    text.set_valign(gtk::Align::Center);
+    let title = gtk::Label::builder()
+        .label(&item.title)
+        .xalign(0.)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    title.add_css_class("result-title");
+    if matches!(item.kind, Kind::Calculation(_)) {
+        title.add_css_class("calc-value");
+    }
+    text.append(&title);
+    if !item.subtitle.is_empty() {
+        let subtitle = gtk::Label::builder()
+            .label(&item.subtitle)
+            .xalign(0.)
+            .ellipsize(gtk::pango::EllipsizeMode::Middle)
+            .build();
+        subtitle.add_css_class("result-subtitle");
+        text.append(&subtitle);
+    }
+    content.append(&text);
+    if favorite {
+        let star = gtk::Image::from_icon_name("starred-symbolic");
+        star.add_css_class("favorite");
+        star.set_valign(gtk::Align::Center);
+        content.append(&star);
+    }
+    let kind = match &item.kind {
+        Kind::App(_) => "Application",
+        Kind::File(_) if item.icon == "folder" => "Folder",
+        Kind::File(_) => "File",
+        Kind::Calculation(_) => "Calculator",
+        Kind::Command { extension, .. } if extension.is_empty() => "",
+        Kind::Command { .. } => "Command",
+        Kind::Settings => "Lumen",
+    };
+    if !kind.is_empty() {
+        let badge = gtk::Label::new(Some(kind));
+        badge.add_css_class("result-kind");
+        badge.set_valign(gtk::Align::Center);
+        content.append(&badge);
+    }
+    content
+}
+
+fn reveal_in_files(uri: String) {
+    gio::bus_get(
+        gio::BusType::Session,
+        None::<&gio::Cancellable>,
+        move |result| {
+            if let Ok(bus) = result {
+                bus.call(
+                    Some("org.freedesktop.FileManager1"),
+                    "/org/freedesktop/FileManager1",
+                    "org.freedesktop.FileManager1",
+                    "ShowItems",
+                    Some(&(vec![uri], "").to_variant()),
+                    None,
+                    gio::DBusCallFlags::NONE,
+                    5000,
+                    None::<&gio::Cancellable>,
+                    |r| {
+                        if let Err(e) = r {
+                            eprintln!("Reveal: {e}");
+                        }
+                    },
+                );
+            }
+        },
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn spin_until(check: impl Fn() -> bool) {
+        let context = glib::MainContext::default();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !check() {
+            while context.pending() {
+                context.iteration(false);
+            }
+            assert!(Instant::now() < deadline, "UI operation timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    #[test]
+    #[ignore = "requires a GNOME display; run isolated with --test-threads=1"]
+    fn native_palette() {
+        adw::init().unwrap();
+        let app = adw::Application::builder()
+            .application_id("io.github.gnomelauncher.Test")
+            .build();
+        app.register(None::<&gio::Cancellable>).unwrap();
+        let ui = Ui::new(&app);
+        ui.show();
+        spin_until(|| ui.window.is_mapped());
+        assert!(!ui.results.borrow().is_empty());
+        assert!(ui.list.row_at_index(0).unwrap().header().is_some());
+        ui.entry.set_text("2 + 3 * 4");
+        assert!(matches!(&ui.results.borrow()[0].kind, Kind::Calculation(v) if v == "14"));
+        ui.entry.set_text("Files");
+        assert!(
+            ui.results
+                .borrow()
+                .iter()
+                .any(|i| matches!(i.kind, Kind::App(_)))
+        );
+        // A stale response must not overwrite the new query or keep polling alive.
+        ui.entry.set_text("png");
+        ui.entry.set_text("nonexistent-application-qzxq");
+        assert!(ui.results.borrow().is_empty());
+        ui.back();
+        ui.open_settings();
+        assert!(ui.settings_window.borrow().as_ref().unwrap().is_visible());
+        ui.settings_window.borrow().as_ref().unwrap().close();
+        let ext = package::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/quick-links"),
+        )
+        .unwrap();
+        *ui.active.borrow_mut() = Some((ext, "links".into()));
+        ui.extension_request("command.run", json!({}));
+        spin_until(|| ui.view.borrow()["type"] == "list");
+        assert_eq!(ui.results.borrow().len(), 3);
+        ui.back();
+        let mut ext = package::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/scratchpad"),
+        )
+        .unwrap();
+        ext.manifest.id = format!("lumen-smoke-{}", std::process::id());
+        let storage = store::data_dir()
+            .join("extension-storage")
+            .join(format!("{}.json", ext.manifest.id));
+        *ui.active.borrow_mut() = Some((ext, "note".into()));
+        ui.extension_request("command.run", json!({}));
+        spin_until(|| ui.view.borrow()["type"] == "form");
+        assert_eq!(ui.form.borrow().len(), 2);
+        let entry = ui.form.borrow()[0]
+            .1
+            .clone()
+            .downcast::<gtk::Entry>()
+            .unwrap();
+        entry.set_text("Native form smoke test");
+        let check = ui.form.borrow()[1]
+            .1
+            .clone()
+            .downcast::<gtk::CheckButton>()
+            .unwrap();
+        check.set_active(false);
+        ui.detail
+            .last_child()
+            .unwrap()
+            .downcast::<gtk::Button>()
+            .unwrap()
+            .emit_clicked();
+        spin_until(|| ui.view.borrow()["type"] == "detail");
+        assert_eq!(ui.view.borrow()["text"], "Native form smoke test");
+        let _ = std::fs::remove_file(storage);
+        ui.back();
+        // Native GTK renders, useful for visual review without capturing other windows.
+        if let Some(dir) = std::env::var_os("LUMEN_SCREENSHOT") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let settle = |ms| {
+                let context = glib::MainContext::default();
+                let until = Instant::now() + Duration::from_millis(ms);
+                while Instant::now() < until {
+                    while context.pending() {
+                        context.iteration(false);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            };
+            let capture = |name: &str| {
+                settle(400);
+                let paintable = gtk::WidgetPaintable::new(Some(&ui.window));
+                let snapshot = gtk::Snapshot::new();
+                paintable.snapshot(
+                    &snapshot,
+                    ui.window.width() as f64,
+                    ui.window.height() as f64,
+                );
+                let node = snapshot.to_node().unwrap();
+                let texture = ui.window.renderer().unwrap().render_texture(&node, None);
+                texture
+                    .save_to_png(dir.join(format!("{name}.png")))
+                    .unwrap();
+            };
+            let styles = adw::StyleManager::default();
+            for (scheme, suffix) in [
+                (adw::ColorScheme::ForceLight, "light"),
+                (adw::ColorScheme::ForceDark, "dark"),
+            ] {
+                styles.set_color_scheme(scheme);
+                ui.back();
+                capture(&format!("lumen-suggestions-{suffix}"));
+                let query = std::env::var("LUMEN_SCREENSHOT_QUERY").unwrap_or("te".into());
+                ui.entry.set_text(&query);
+                ui.move_selection(1);
+                capture(&format!("lumen-search-{suffix}"));
+                ui.entry.set_text("sqrt(144) * 3");
+                capture(&format!("lumen-calculator-{suffix}"));
+                ui.entry.set_text("qzxqv nothing");
+                capture(&format!("lumen-empty-{suffix}"));
+                ui.entry.set_text("Files");
+                spin_until(|| !ui.file_results.borrow().is_empty());
+                capture(&format!("lumen-files-{suffix}"));
+            }
+            styles.set_color_scheme(adw::ColorScheme::Default);
+        }
+        ui.hide();
+        ui.window.destroy();
+    }
+}

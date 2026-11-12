@@ -1,0 +1,464 @@
+use super::*;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+struct Stage {
+    root: PathBuf,
+    extension: Extension,
+}
+impl Drop for Stage {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+fn prepare(source: &str) -> anyhow::Result<Stage> {
+    let root = store::data_dir().join("staging").join(format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root)?;
+    let result = (|| {
+        package::download(source, &root.join("package.tgz"))?;
+        package::unpack(&root.join("package.tgz"), &root.join("extension"))
+    })();
+    match result {
+        Ok(extension) => Ok(Stage { root, extension }),
+        Err(e) => {
+            let _ = fs::remove_dir_all(root);
+            Err(e)
+        }
+    }
+}
+fn shortcut_settings() -> Option<gio::Settings> {
+    let schema = "org.gnome.shell.extensions.lumen";
+    let default = gio::SettingsSchemaSource::default()?;
+    let local =
+        glib::user_data_dir().join("gnome-shell/extensions/lumen@gnome-launcher.local/schemas");
+    let source = gio::SettingsSchemaSource::from_directory(&local, Some(&default), false).ok();
+    let schema = source
+        .as_ref()
+        .and_then(|s| s.lookup(schema, true))
+        .or_else(|| default.lookup(schema, true))?;
+    Some(gio::Settings::new_full(
+        &schema,
+        None::<&gio::SettingsBackend>,
+        None,
+    ))
+}
+impl Ui {
+    pub(super) fn open_settings(self: &Rc<Self>) {
+        if let Some(window) = self
+            .settings_window
+            .borrow()
+            .as_ref()
+            .filter(|w| w.is_visible())
+        {
+            window.present();
+            return;
+        }
+        self.cancel();
+        self.state.borrow_mut().developers = Store::load().developers;
+        self.refresh_extensions();
+        let window = adw::PreferencesWindow::builder()
+            .application(&self.app)
+            .title("Lumen Settings")
+            .default_width(680)
+            .default_height(640)
+            .search_enabled(true)
+            .build();
+        let general = adw::PreferencesPage::builder()
+            .title("General")
+            .icon_name("emblem-system-symbolic")
+            .build();
+        let behavior = adw::PreferencesGroup::builder()
+            .title("Keyboard and preferences")
+            .description("Super+Space opens Lumen. Super+Shift+Space switches keyboard layouts.")
+            .build();
+        let shortcut = adw::EntryRow::builder()
+            .title("Launcher shortcut")
+            .text("<Super>space")
+            .build();
+        if let Some(settings) = shortcut_settings() {
+            shortcut.set_text(
+                settings
+                    .strv("toggle-lumen")
+                    .first()
+                    .map(|s| s.as_str())
+                    .unwrap_or("<Super>space"),
+            );
+            let apply = gtk::Button::with_label("Apply");
+            apply.set_valign(gtk::Align::Center);
+            shortcut.add_suffix(&apply);
+            let weak = shortcut.downgrade();
+            let settings = settings.clone();
+            apply.connect_clicked(move |_| {
+                if let Some(row) = weak.upgrade() {
+                    if let Some((key, modifiers)) = gtk::accelerator_parse(row.text())
+                        && !modifiers.is_empty()
+                        && gtk::accelerator_valid(key, modifiers)
+                    {
+                        match settings.set_strv("toggle-lumen", [row.text().as_str()]) {
+                            Ok(_) => row.remove_css_class("error"),
+                            Err(_) => row.add_css_class("error"),
+                        }
+                        return;
+                    }
+                    row.add_css_class("error");
+                    row.set_tooltip_text(Some(
+                        "Use a valid accelerator such as <Super>space or <Control><Alt>space",
+                    ));
+                }
+            });
+        } else {
+            shortcut.set_sensitive(false);
+            shortcut.set_tooltip_text(Some(
+                "Install the GNOME Shell integration to configure the shortcut",
+            ));
+        }
+        behavior.add(&shortcut);
+        let history = adw::ActionRow::builder()
+            .use_markup(false)
+            .title("Usage history")
+            .subtitle("Used locally to rank suggestions; search text is never stored.")
+            .build();
+        let clear = gtk::Button::with_label("Clear history");
+        clear.set_valign(gtk::Align::Center);
+        history.add_suffix(&clear);
+        let weak = Rc::downgrade(self);
+        clear.connect_clicked(move |button| {
+            if let Some(ui) = weak.upgrade() {
+                ui.state.borrow_mut().usage.clear();
+                ui.persist();
+                button.set_label("Cleared");
+                if ui.active.borrow().is_none() {
+                    ui.render_search();
+                }
+            }
+        });
+        behavior.add(&history);
+        let about = adw::ActionRow::builder()
+            .use_markup(false)
+            .title("Lumen 0.1.0")
+            .subtitle("A native command palette for GNOME · No telemetry or cloud account")
+            .build();
+        behavior.add(&about);
+        general.add(&behavior);
+        window.add(&general);
+
+        let files_page = adw::PreferencesPage::builder()
+            .title("Files")
+            .icon_name("folder-symbolic")
+            .build();
+        let indexing = adw::PreferencesGroup::builder().title("GNOME file index").description("Lumen searches file and folder names using LocalSearch. Indexed folders and exclusions are shared with GNOME Files.").build();
+        let index_status = adw::ActionRow::builder()
+            .use_markup(false)
+            .title("Index status")
+            .subtitle("Checking LocalSearch…")
+            .build();
+        indexing.add(&index_status);
+        let folders = adw::ActionRow::builder()
+            .use_markup(false)
+            .title("Indexed folders")
+            .subtitle("Choose the folders GNOME indexes in Search settings.")
+            .build();
+        let open = gtk::Button::with_label("Open Search Settings");
+        open.set_valign(gtk::Align::Center);
+        folders.add_suffix(&open);
+        let row = folders.clone();
+        open.connect_clicked(move |_| {
+            if let Err(e) = gio::Subprocess::newv(
+                &[
+                    std::ffi::OsStr::new("gnome-control-center"),
+                    std::ffi::OsStr::new("search"),
+                ],
+                gio::SubprocessFlags::NONE,
+            ) {
+                row.set_subtitle(&e.to_string());
+            }
+        });
+        indexing.add(&folders);
+        files_page.add(&indexing);
+        window.add(&files_page);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(files::status().unwrap_or_else(|e| e.to_string()));
+        });
+        let weak_row = index_status.downgrade();
+        glib::timeout_add_local(Duration::from_millis(50), move || {
+            let Some(row) = weak_row.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            match rx.try_recv() {
+                Ok(text) => {
+                    row.set_subtitle(&text);
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(_) => glib::ControlFlow::Break,
+            }
+        });
+
+        let extensions_page = adw::PreferencesPage::builder()
+            .title("Extensions")
+            .icon_name("application-x-addon-symbolic")
+            .build();
+        let install = adw::PreferencesGroup::builder().title("Install an extension").description("Choose a .lumen-extension package or paste its HTTPS URL. Review its source and capabilities before enabling it.").build();
+        let source = adw::EntryRow::builder()
+            .title("Package path or HTTPS URL")
+            .build();
+        let choose = gtk::Button::from_icon_name("folder-open-symbolic");
+        choose.set_valign(gtk::Align::Center);
+        choose.set_tooltip_text(Some("Choose extension package"));
+        source.add_suffix(&choose);
+        let weak_source = source.downgrade();
+        let parent = window.downgrade();
+        choose.connect_clicked(move |_| {
+            let source = weak_source.clone();
+            let parent = parent.clone();
+            glib::spawn_future_local(async move {
+                let dialog = gtk::FileDialog::builder()
+                    .title("Choose extension package")
+                    .build();
+                if let Ok(file) = dialog.open_future(parent.upgrade().as_ref()).await
+                    && let (Some(row), Some(path)) = (source.upgrade(), file.path())
+                {
+                    row.set_text(&path.display().to_string());
+                }
+            });
+        });
+        let inspect = gtk::Button::with_label("Review");
+        inspect.set_valign(gtk::Align::Center);
+        source.add_suffix(&inspect);
+        install.add(&source);
+        let install_status = adw::ActionRow::builder()
+            .use_markup(false)
+            .title("Ready to install")
+            .subtitle("Packages are self-contained; installation scripts are never run.")
+            .build();
+        install.add(&install_status);
+        let weak = Rc::downgrade(self);
+        let row = install_status.clone();
+        let parent = window.downgrade();
+        let source_weak = source.downgrade();
+        inspect.connect_clicked(move |button| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let Some(source) = source_weak.upgrade() else {
+                return;
+            };
+            let Some(parent) = parent.upgrade() else {
+                return;
+            };
+            let location = source.text().trim().to_owned();
+            if location.is_empty() {
+                row.set_subtitle("Choose a package or enter an HTTPS URL.");
+                return;
+            }
+            button.set_sensitive(false);
+            row.set_title("Inspecting package…");
+            row.set_subtitle("Downloading and validating the extension");
+            let (tx, rx) = mpsc::channel();
+            let request_source = location.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(prepare(&request_source).map_err(|e| format!("{e:#}")));
+            });
+            let button = button.downgrade();
+            let row = row.downgrade();
+            let weak = Rc::downgrade(&ui);
+            let parent = parent.downgrade();
+            glib::timeout_add_local(Duration::from_millis(40), move || {
+                match rx.try_recv() {
+                    Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                    Ok(Ok(stage)) => {
+                        if let (Some(ui), Some(row), Some(parent)) =
+                            (weak.upgrade(), row.upgrade(), parent.upgrade())
+                        {
+                            ui.review_package(stage, &location, &parent, &row);
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        if let Some(row) = row.upgrade() {
+                            row.set_title("Could not install extension");
+                            row.set_subtitle(&e);
+                        }
+                    }
+                    Err(_) => {
+                        if let Some(row) = row.upgrade() {
+                            row.set_subtitle("Package inspection stopped unexpectedly");
+                        }
+                    }
+                }
+                if let Some(button) = button.upgrade() {
+                    button.set_sensitive(true);
+                }
+                glib::ControlFlow::Break
+            });
+        });
+        extensions_page.add(&install);
+
+        let installed = adw::PreferencesGroup::builder()
+            .title("Installed extensions")
+            .build();
+        if self.extensions.borrow().is_empty() {
+            installed.add(
+                &adw::ActionRow::builder()
+                    .use_markup(false)
+                    .title("No extensions installed yet")
+                    .subtitle("Install a package above or load a developer project below.")
+                    .build(),
+            );
+        }
+        for ext in self.extensions.borrow().iter() {
+            let row = adw::ActionRow::builder()
+                .use_markup(false)
+                .title(&ext.manifest.name)
+                .subtitle(format!(
+                    "{} · {}",
+                    ext.manifest.version, ext.manifest.description
+                ))
+                .build();
+            row.set_tooltip_text(Some(&ext.directory.display().to_string()));
+            let toggle = gtk::Switch::builder()
+                .active(!self.state.borrow().disabled.contains(&ext.manifest.id))
+                .valign(gtk::Align::Center)
+                .build();
+            toggle.set_tooltip_text(Some("Enable extension"));
+            row.add_suffix(&toggle);
+            let id = ext.manifest.id.clone();
+            let weak = Rc::downgrade(self);
+            toggle.connect_active_notify(move |toggle| {
+                if let Some(ui) = weak.upgrade() {
+                    {
+                        let mut state = ui.state.borrow_mut();
+                        if toggle.is_active() {
+                            state.disabled.remove(&id);
+                        } else {
+                            state.disabled.insert(id.clone());
+                        }
+                    }
+                    ui.cancel();
+                    ui.runtime.stop(&id);
+                    ui.persist();
+                    ui.refresh_extensions();
+                }
+            });
+            let remove = gtk::Button::from_icon_name("user-trash-symbolic");
+            remove.add_css_class("flat");
+            remove.set_valign(gtk::Align::Center);
+            remove.set_tooltip_text(Some("Remove extension"));
+            row.add_suffix(&remove);
+            let ext = ext.clone();
+            let weak = Rc::downgrade(self);
+            let row_weak = row.downgrade();
+            let parent = window.downgrade();
+            remove.connect_clicked(move |_| {
+                let (Some(ui), Some(parent)) = (weak.upgrade(), parent.upgrade()) else { return; };
+                let dialog = adw::AlertDialog::builder().heading(format!("Remove {}?", ext.manifest.name)).body("The extension will be disabled and removed. Its saved extension data will be kept.").build();
+                dialog.add_responses(&[("cancel", "Cancel"), ("remove", "Remove")]); dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive); dialog.set_close_response("cancel");
+                let ext = ext.clone(); let weak = Rc::downgrade(&ui); let row = row_weak.clone();
+                dialog.connect_response(None, move |_, response| {
+                    if response != "remove" { return; }
+                    if let Some(ui) = weak.upgrade() {
+                        ui.cancel(); ui.runtime.stop(&ext.manifest.id);
+                        let developer = ui.state.borrow().developers.contains(&ext.directory);
+                        let result = if developer { ui.state.borrow_mut().developers.remove(&ext.directory); Ok(()) } else {
+                            let target = store::data_dir().join("extensions").join(&ext.manifest.id);
+                            if target == ext.directory { fs::remove_dir_all(&target) } else { Err(std::io::Error::other("Refusing to remove a directory outside extension storage")) }
+                        };
+                        if let Err(e) = result { if let Some(row) = row.upgrade() { row.set_subtitle(&e.to_string()); } return; }
+                        ui.state.borrow_mut().disabled.remove(&ext.manifest.id); ui.persist(); ui.refresh_extensions(); if let Some(row) = row.upgrade() { row.set_visible(false); }
+                    }
+                }); dialog.present(Some(&parent));
+            });
+            installed.add(&row);
+        }
+        extensions_page.add(&installed);
+        let developer = adw::PreferencesGroup::builder().title("Develop extensions").description("Load a local project containing extension.json. Developer folders are trusted local programs and are never deleted by Lumen.").build();
+        let folder = adw::EntryRow::builder()
+            .title("Developer project folder")
+            .build();
+        let load = gtk::Button::with_label("Load");
+        load.set_valign(gtk::Align::Center);
+        folder.add_suffix(&load);
+        let weak_folder = folder.downgrade();
+        let weak = Rc::downgrade(self);
+        load.connect_clicked(move |button| {
+            if let (Some(ui), Some(folder)) = (weak.upgrade(), weak_folder.upgrade()) {
+                match package::load(Path::new(folder.text().as_str())) {
+                    Ok(ext) => {
+                        ui.state.borrow_mut().developers.insert(ext.directory);
+                        ui.persist();
+                        ui.refresh_extensions();
+                        button.set_label("Loaded");
+                        folder.remove_css_class("error");
+                    }
+                    Err(e) => {
+                        folder.add_css_class("error");
+                        folder.set_tooltip_text(Some(&format!("{e:#}")));
+                    }
+                }
+            }
+        });
+        developer.add(&folder);
+        extensions_page.add(&developer);
+        window.add(&extensions_page);
+        *self.settings_window.borrow_mut() = Some(window.clone());
+        window.present();
+    }
+    fn review_package(
+        self: &Rc<Self>,
+        stage: Stage,
+        source: &str,
+        parent: &adw::PreferencesWindow,
+        status: &adw::ActionRow,
+    ) {
+        let manifest = &stage.extension.manifest;
+        let target = store::data_dir().join("extensions").join(&manifest.id);
+        let replacing = target.exists();
+        let heading = format!(
+            "{} {}?",
+            if replacing { "Replace" } else { "Install" },
+            manifest.name
+        );
+        let capabilities = if manifest.capabilities.is_empty() {
+            "None declared".into()
+        } else {
+            manifest.capabilities.join(", ")
+        };
+        let dialog = adw::AlertDialog::builder().heading(heading).body(format!("{} · version {}\n\nSource: {}\nCapabilities: {}\n\nExtensions run as your user and can access your files and network. Install only programs you trust.", manifest.id, manifest.version, source, capabilities)).build();
+        dialog.add_responses(&[
+            ("cancel", "Cancel"),
+            (
+                "install",
+                if replacing {
+                    "Replace & Enable"
+                } else {
+                    "Install & Enable"
+                },
+            ),
+        ]);
+        dialog.set_response_appearance("install", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        let stage = Rc::new(stage);
+        let weak = Rc::downgrade(self);
+        let row = status.downgrade();
+        dialog.connect_response(None, move |_, response| {
+            if response != "install" { if let Some(row) = row.upgrade() { row.set_title("Installation cancelled"); row.set_subtitle("No extension was installed."); } return; }
+            if let Some(ui) = weak.upgrade() {
+                ui.cancel(); ui.runtime.stop(&stage.extension.manifest.id);
+                match package::install(&stage.extension.directory, &store::data_dir().join("extensions"), replacing) {
+                    Ok(()) => { ui.state.borrow_mut().disabled.remove(&stage.extension.manifest.id); ui.persist(); ui.refresh_extensions(); if let Some(row) = row.upgrade() { row.set_title("Extension installed"); row.set_subtitle("Its commands are available in the palette. Reopen Settings to manage it."); } }
+                    Err(e) => if let Some(row) = row.upgrade() { row.set_title("Installation failed"); row.set_subtitle(&format!("{e:#}")); },
+                }
+            }
+        });
+        dialog.present(Some(parent));
+    }
+}

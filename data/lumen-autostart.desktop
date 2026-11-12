@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Lumen Launcher
+Comment=Keep the command palette ready for Super+Space
+Exec=gnome-launcher --background
+Icon=io.github.gnomelauncher.Launcher
+X-GNOME-Autostart-enabled=true
+OnlyShowIn=GNOME;
+NoDisplay=true

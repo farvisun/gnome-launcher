@@ -1,0 +1,224 @@
+/* Lumen palette. Colours come from libadwaita variables so light, dark and the
+   system accent all follow the desktop. */
+
+window.palette {
+  border-radius: 16px;
+  background-color: var(--window-bg-color);
+}
+window.palette > contents {
+  border-radius: 16px;
+  border: 1px solid alpha(currentColor, 0.1);
+}
+window.palette separator {
+  background-color: alpha(currentColor, 0.07);
+}
+
+/* Search bar */
+.search-bar {
+  padding: 12px 14px 12px 20px;
+  min-height: 44px;
+}
+.palette-search,
+.palette-search:focus-within {
+  background: none;
+  border: none;
+  box-shadow: none;
+  outline: 0 solid transparent;
+  min-height: 44px;
+  padding: 0;
+  font-size: 19px;
+}
+.palette-search > image.left {
+  -gtk-icon-size: 20px;
+  margin-right: 12px;
+  opacity: 0.5;
+}
+.palette-search > image.right {
+  opacity: 0.45;
+}
+.palette-search > text > placeholder {
+  opacity: 0.4;
+}
+.search-bar > button.circular {
+  min-width: 34px;
+  min-height: 34px;
+  opacity: 0.7;
+}
+.search-bar > button.circular:hover {
+  opacity: 1;
+}
+button.scope {
+  padding: 3px 10px 3px 7px;
+  min-height: 26px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background-color: alpha(var(--accent-bg-color), 0.14);
+  color: var(--accent-color);
+}
+button.scope:hover {
+  background-color: alpha(var(--accent-bg-color), 0.22);
+}
+
+/* Results */
+.results {
+  background: none;
+  padding: 2px 8px 8px;
+}
+.results > row {
+  outline: none;
+}
+.results > row.result-row {
+  padding: 7px 12px;
+  margin: 1px 0;
+  min-height: 40px;
+  border-radius: 10px;
+  transition: background-color 120ms ease-out;
+}
+.results > row.result-row:hover {
+  background-color: alpha(currentColor, 0.04);
+}
+.results > row.result-row:selected,
+.results > row.result-row:selected:hover {
+  background-color: alpha(var(--accent-bg-color), 0.16);
+}
+.results > row.result-row:active {
+  background-color: alpha(var(--accent-bg-color), 0.24);
+}
+.section-label {
+  margin: 12px 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.5;
+}
+.result-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.result-title.calc-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+.result-subtitle {
+  font-size: 12px;
+  opacity: 0.6;
+}
+image.symbolic-tile {
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+  background-color: alpha(currentColor, 0.07);
+}
+.results > row:selected image.symbolic-tile {
+  background-color: alpha(var(--accent-bg-color), 0.2);
+  color: var(--accent-color);
+}
+.result-kind {
+  margin-left: 8px;
+  font-size: 12px;
+  opacity: 0.45;
+}
+.results > row:selected .result-kind {
+  opacity: 0.7;
+}
+image.favorite {
+  color: var(--warning-color);
+  -gtk-icon-size: 14px;
+}
+
+/* Empty state */
+.empty-state {
+  padding: 64px 24px;
+}
+.empty-icon {
+  opacity: 0.25;
+  margin-bottom: 8px;
+}
+.empty-title {
+  font-size: 15px;
+  font-weight: 700;
+  opacity: 0.8;
+}
+.empty-hint {
+  font-size: 13px;
+  opacity: 0.5;
+}
+
+/* Footer */
+.footer {
+  padding: 7px 10px 7px 16px;
+  min-height: 30px;
+  font-size: 12px;
+  background-color: alpha(currentColor, 0.025);
+  border-top: 1px solid alpha(currentColor, 0.07);
+}
+.footer separator {
+  margin: 6px 0;
+}
+.footer .brand {
+  opacity: 0.75;
+}
+.footer .status {
+  opacity: 0.55;
+}
+.key-hint {
+  font-size: 12px;
+  font-weight: 500;
+}
+.key-hint > label:not(.keycap) {
+  opacity: 0.7;
+}
+.keycap {
+  min-width: 12px;
+  min-height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  background-color: alpha(currentColor, 0.08);
+  box-shadow: inset 0 -1px alpha(currentColor, 0.12);
+}
+button.actions-button {
+  padding: 2px 8px;
+  min-height: 26px;
+  border-radius: 7px;
+}
+
+/* Actions menu */
+popover.actions-menu > contents {
+  padding: 6px;
+  min-width: 220px;
+}
+button.action-item {
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-weight: 500;
+}
+button.action-item image {
+  opacity: 0.7;
+}
+popover.actions-menu separator {
+  margin: 4px 6px;
+}
+
+/* Extension detail and form views */
+.detail {
+  padding: 24px 28px;
+}
+.detail-title {
+  margin-bottom: 4px;
+}
+.detail-body {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.field-label {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+.detail button.pill {
+  margin-top: 8px;
+}

@@ -1,0 +1,16 @@
+/target/
+/.build-deps/
+/dist/
+/sdk/node_modules/
+/node_modules/
+*.lumen-extension
+gschemas.compiled
+__pycache__/
+
+# Editor and local tooling
+.claude/
+.vscode/
+.idea/
+*.log
+.env
+.env.*

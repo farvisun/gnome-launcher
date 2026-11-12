@@ -1,0 +1,10 @@
+{
+  "id": "scratchpad",
+  "name": "Scratchpad",
+  "version": "1.0.0",
+  "sdk_version": 1,
+  "entry": "index.mjs",
+  "description": "An example native form and persistent extension storage",
+  "capabilities": ["storage", "clipboard", "notifications"],
+  "commands": [{"id": "note", "title": "Write a Quick Note", "keywords": ["scratchpad", "notes"]}]
+}

@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumen · GNOME Launcher</title>
+<meta name="description" content="Lumen is a fast, native command launcher for GNOME on Wayland. Press Super+Space to search apps, files and commands, calculate, and run extensions.">
+<meta property="og:title" content="Lumen · GNOME Launcher">
+<meta property="og:description" content="A fast, native command launcher for GNOME on Wayland, built with GTK4, libadwaita and Rust.">
+<meta property="og:image" content="assets/lumen-search-dark.png">
+<meta name="theme-color" content="#204e9e">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f7f8fa;
+  --bg-2: #ffffff;
+  --fg: #12161d;
+  --muted: #5a6473;
+  --line: #e3e7ed;
+  --card: #ffffff;
+  --accent: #2f6fd0;
+  --accent-2: #204e9e;
+  --mint: #2a9d78;
+  --code-bg: #0f1520;
+  --code-fg: #dce4f0;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 12px 32px -12px rgba(16, 24, 40, .16);
+  --glow: radial-gradient(60% 50% at 50% 0%, rgba(57, 124, 219, .16), transparent 70%);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0e13; --bg-2: #10141b; --fg: #eef2f7; --muted: #98a3b3; --line: #1f2632;
+    --card: #121822; --accent: #6aa3ff; --accent-2: #397cdb; --mint: #7fdcbc;
+    --code-bg: #0a0d12; --code-fg: #dce4f0;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 18px 40px -16px rgba(0, 0, 0, .6);
+    --glow: radial-gradient(60% 50% at 50% 0%, rgba(57, 124, 219, .28), transparent 70%);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b0e13; --bg-2: #10141b; --fg: #eef2f7; --muted: #98a3b3; --line: #1f2632;
+  --card: #121822; --accent: #6aa3ff; --accent-2: #397cdb; --mint: #7fdcbc;
+  --code-bg: #0a0d12; --code-fg: #dce4f0;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 18px 40px -16px rgba(0, 0, 0, .6);
+  --glow: radial-gradient(60% 50% at 50% 0%, rgba(57, 124, 219, .28), transparent 70%);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.6 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased; overflow-x: hidden;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre, kbd { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+/* Nav */
+nav { position: sticky; top: 0; z-index: 10; backdrop-filter: saturate(1.4) blur(14px);
+  background: color-mix(in srgb, var(--bg) 78%, transparent); border-bottom: 1px solid var(--line); }
+nav .wrap { display: flex; align-items: center; gap: 28px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--fg); font-size: 17px; }
+.brand:hover { text-decoration: none; }
+.brand img { width: 28px; height: 28px; }
+.links { display: flex; gap: 22px; margin-left: auto; font-size: 14px; }
+.links a { color: var(--muted); font-weight: 500; }
+.links a:hover { color: var(--fg); text-decoration: none; }
+.icon-btn { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+.icon-btn:hover { border-color: var(--accent); }
+.icon-btn svg { width: 18px; height: 18px; }
+
+/* Hero */
+.hero { position: relative; padding: 88px 0 40px; text-align: center; }
+.hero::before { content: ""; position: absolute; inset: 0; background: var(--glow); pointer-events: none; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card); font-size: 13px; color: var(--muted); font-weight: 500; }
+.pill b { color: var(--mint); font-weight: 600; }
+h1 { position: relative; font-size: clamp(40px, 7vw, 68px); line-height: 1.04; letter-spacing: -.035em;
+  margin: 22px auto 18px; max-width: 14ch; font-weight: 800; }
+h1 span { background: linear-gradient(120deg, var(--accent), var(--mint)); -webkit-background-clip: text;
+  background-clip: text; color: transparent; }
+.lede { position: relative; font-size: clamp(17px, 2.2vw, 20px); color: var(--muted); max-width: 640px; margin: 0 auto; }
+.combo { white-space: nowrap; }
+kbd { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: .82em; font-weight: 500;
+  border: 1px solid var(--line); border-bottom-width: 2px; background: var(--card); color: var(--fg); }
+.cta { position: relative; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 34px 0 0; }
+.btn { display: inline-flex; align-items: center; gap: 9px; padding: 12px 20px; border-radius: 12px;
+  font-weight: 600; font-size: 15px; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.btn:hover { text-decoration: none; transform: translateY(-1px); border-color: var(--accent); }
+.btn.primary { background: linear-gradient(180deg, #3d82e3, #245ab4); color: #fff; border-color: transparent;
+  box-shadow: 0 8px 22px -10px rgba(36, 90, 180, .8); }
+.btn svg { width: 18px; height: 18px; }
+.meta { position: relative; margin-top: 16px; font-size: 13px; color: var(--muted); }
+
+/* Showcase */
+.showcase { padding: 28px 0 40px; }
+.tabs { display: flex; justify-content: center; gap: 6px; margin-bottom: 22px; flex-wrap: wrap; }
+.tab { padding: 8px 16px; border-radius: 10px; border: 1px solid transparent; background: none; color: var(--muted);
+  font: 500 14px Inter, sans-serif; cursor: pointer; }
+.tab:hover { color: var(--fg); }
+.tab[aria-selected="true"] { background: var(--card); color: var(--fg); border-color: var(--line); box-shadow: var(--shadow); }
+.frame { position: relative; max-width: 760px; margin: 0 auto; border-radius: 22px; padding: 20px;
+  background: linear-gradient(140deg, #397cdb, #204e9e 55%, #1c6b5a); box-shadow: var(--shadow); }
+.frame img { display: block; width: 100%; height: auto; border-radius: 16px; aspect-ratio: 720 / 480;
+  box-shadow: 0 30px 60px -20px rgba(0, 0, 0, .55); }
+.caption { text-align: center; color: var(--muted); font-size: 14px; margin-top: 16px; min-height: 1.6em; }
+
+/* Sections */
+section.block { padding: 84px 0; border-top: 1px solid var(--line); }
+.eyebrow { font-size: 13px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
+h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -.025em; line-height: 1.15; margin: 10px 0 14px; }
+.sub { color: var(--muted); max-width: 620px; margin: 0 0 44px; font-size: 17px; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px; }
+.card h3 { margin: 14px 0 6px; font-size: 17px; letter-spacing: -.01em; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+.glyph { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
+.glyph svg { width: 20px; height: 20px; }
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: start; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+td { padding: 13px 18px; border-top: 1px solid var(--line); }
+tr:first-child td { border-top: 0; }
+td:first-child { white-space: nowrap; width: 1%; }
+td:last-child { color: var(--muted); }
+
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px; }
+.stat b { display: block; font-size: 30px; letter-spacing: -.03em; }
+.stat span { color: var(--muted); font-size: 14px; }
+
+/* Code */
+.code { position: relative; background: var(--code-bg); color: var(--code-fg); border-radius: 14px;
+  border: 1px solid var(--line); overflow: hidden; }
+.code header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, .07); font: 500 12px Inter, sans-serif; color: #8d99ab; }
+.code pre { margin: 0; padding: 16px 18px; overflow-x: auto; font-size: 13.5px; line-height: 1.65; }
+.copy { background: rgba(255, 255, 255, .06); color: #c7d0dc; border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 7px; padding: 3px 10px; font: 500 12px Inter, sans-serif; cursor: pointer; }
+.copy:hover { background: rgba(255, 255, 255, .12); }
+.c { color: #6c7a8e; } .k { color: #8fb8ff; } .s { color: #9fe0c3; } .f { color: #f0c987; }
+.steps { display: grid; gap: 16px; }
+.step-title { font-weight: 600; margin: 0 0 8px; font-size: 15px; }
+.step-title small { color: var(--muted); font-weight: 400; }
+.note { margin-top: 18px; font-size: 14px; color: var(--muted); padding: 14px 16px; border-radius: 12px;
+  border: 1px dashed var(--line); }
+
+footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; }
+footer nav { position: static; background: none; border: 0; backdrop-filter: none; }
+
+@media (max-width: 900px) {
+  .grid { grid-template-columns: 1fr 1fr; }
+  .split { grid-template-columns: 1fr; gap: 32px; }
+}
+@media (max-width: 640px) {
+  .wrap { padding: 0 16px; }
+  .links a:not(.keep) { display: none; }
+  nav .wrap { gap: 14px; }
+  .icon-btn { flex-shrink: 0; }
+  .grid, .stats { grid-template-columns: 1fr; }
+  .hero { padding-top: 56px; }
+  .frame { padding: 10px; border-radius: 16px; }
+  .frame img { border-radius: 10px; }
+  td { padding: 11px 12px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="assets/icon.svg" alt="">Lumen</a>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#keyboard">Keyboard</a>
+      <a href="#install">Install</a>
+      <a href="#extensions">Extensions</a>
+      <a class="keep" href="https://github.com/farvisun/gnome-launcher">GitHub</a>
+    </div>
+    <button class="icon-btn" id="theme" aria-label="Toggle colour theme" title="Toggle theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <span class="pill"><b>v0.1.0</b> GNOME 50 · Wayland · Ubuntu 26.04</span>
+    <h1>Everything on your desktop, <span>one keystroke away.</span></h1>
+    <p class="lede">Lumen is a native command launcher for GNOME. Press <span class="combo"><kbd>Super</kbd> + <kbd>Space</kbd></span>, type a few letters, and open apps and files, do quick maths, or run extension commands.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/farvisun/gnome-launcher/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M5 21h14"/></svg>
+        Download .deb
+      </a>
+      <a class="btn" href="https://github.com/farvisun/gnome-launcher">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>
+        View source
+      </a>
+    </div>
+    <p class="meta">Free and open source under the MIT license · No telemetry, no account</p>
+  </div>
+</header>
+
+<section class="showcase" aria-label="Screenshots">
+  <div class="wrap">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-shot="search" data-caption="Apps ranked by how well they match and how often you use them.">Apps</button>
+      <button class="tab" role="tab" aria-selected="false" data-shot="files" data-caption="File and folder names from GNOME's own index, with type icons and short paths.">Files</button>
+      <button class="tab" role="tab" aria-selected="false" data-shot="calculator" data-caption="Type a calculation and press Enter to copy the answer.">Calculator</button>
+      <button class="tab" role="tab" aria-selected="false" data-shot="empty" data-caption="When nothing matches, Lumen tells you what else you can search for.">No results</button>
+    </div>
+    <div class="frame">
+      <img id="shot" src="assets/lumen-search-dark.png" width="720" height="480" alt="The Lumen launcher showing search results">
+    </div>
+    <p class="caption" id="caption">Apps ranked by how well they match and how often you use them.</p>
+  </div>
+</section>
+
+<section class="block" id="features">
+  <div class="wrap">
+    <div class="eyebrow">Features</div>
+    <h2>Fast to open, quick to search, and private.</h2>
+    <p class="sub">Lumen uses GTK4 and libadwaita with a Rust core. It follows your system theme and accent colour and stays resident in the background, so it opens without a cold start.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></div>
+        <h3>Apps</h3>
+        <p>Searches every installed app, including Flatpak and Snap. Typos and abbreviations still match, and apps you use often rank higher.</p>
+      </div>
+      <div class="card">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+        <h3>Files and folders</h3>
+        <p>Searches names and paths through GNOME LocalSearch, so it doesn't need a second indexer. Open a file, show it in Files, or copy its path.</p>
+      </div>
+      <div class="card">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 12h.01M12 12h.01M15 12h.01M9 16h.01M12 16h.01M15 16h.01"/></svg></div>
+        <h3>Calculator</h3>
+        <p>Type <code>sqrt(144) * 3</code>, <code>200 * 15%</code> or <code>2^8</code> and get the answer as you type. Press Enter to copy it.</p>
+      </div>
+      <div class="card">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5L5.5 21l2-7.5L2 9h7z"/></svg></div>
+        <h3>Favorites</h3>
+        <p>Pin what you open most with <kbd>Ctrl</kbd> + <kbd>K</kbd>. Usage counts stay on your computer.</p>
+      </div>
+      <div class="card">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 14L20 4M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></div>
+        <h3>Extensions</h3>
+        <p>Write commands in JavaScript or TypeScript. Extensions can show lists, detail pages and forms, and can use the clipboard, notifications and storage.</p>
+      </div>
+      <div class="card">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/></svg></div>
+        <h3>Private</h3>
+        <p>Your searches are never stored or sent anywhere. There's no telemetry, no cloud service and no account to sign in to.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="keyboard">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow">Keyboard</div>
+      <h2>You never need the mouse.</h2>
+      <p class="sub">Every action has a shortcut. The footer shows what Enter will do for the selected result.</p>
+      <div class="stats">
+        <div class="stat"><b>~4 ms</b><span>of app work to show the palette when it's already running</span></div>
+        <div class="stat"><b>&lt;100 ms</b><span>for file results across ~33,000 indexed files</span></div>
+        <div class="stat"><b>~13 MiB</b><span>of memory (PSS) while idle in the background</span></div>
+        <div class="stat"><b>0</b><span>CPU ticks while idle</span></div>
+      </div>
+      <p class="note">Measured on the developer's machine (GNOME 50.1, Ubuntu 26.04). Your numbers may differ.</p>
+    </div>
+    <table>
+      <tr><td><kbd>Super</kbd> + <kbd>Space</kbd></td><td>Open or close Lumen</td></tr>
+      <tr><td><kbd>↑</kbd> <kbd>↓</kbd> &nbsp;<kbd>Ctrl</kbd> + <kbd>N</kbd>/<kbd>P</kbd></td><td>Move the selection</td></tr>
+      <tr><td><kbd>Page Up</kbd> <kbd>Page Down</kbd></td><td>Jump five results</td></tr>
+      <tr><td><kbd>Enter</kbd></td><td>Open, copy or run the selected result</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>K</kbd></td><td>Actions: favorite, show in Files, copy path</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>,</kbd></td><td>Open Settings</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Clear the search, go back, then close</td></tr>
+      <tr><td><kbd>Backspace</kbd></td><td>Leave an extension command when the search is empty</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="block" id="install">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow">Install</div>
+      <h2>Up and running in a minute.</h2>
+      <p class="sub">Lumen targets GNOME 50 on Wayland. A small GNOME Shell extension provides the shortcut, focus and window placement. While Lumen is enabled, keyboard-layout switching moves to <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>.</p>
+      <p class="note">If the shortcut doesn't work at first, log out and back in once so GNOME Shell loads the new extension. You don't need to reboot.</p>
+    </div>
+    <div class="steps">
+      <div>
+        <p class="step-title">Option 1 · Package <small>(Ubuntu 26.04, amd64)</small></p>
+        <div class="code"><header><span>bash</span><button class="copy">Copy</button></header>
+<pre><span class="c"># Download the .deb from the latest release, then:</span>
+sudo apt install ./lumen-launcher_0.1.0_amd64.deb
+gnome-extensions enable lumen@gnome-launcher.local</pre></div>
+      </div>
+      <div>
+        <p class="step-title">Option 2 · From source <small>(Rust 1.92+, Node 22+)</small></p>
+        <div class="code"><header><span>bash</span><button class="copy">Copy</button></header>
+<pre>sudo apt install build-essential pkg-config libgtk-4-dev \
+  libadwaita-1-dev localsearch libtinysparql-3.0-0 python3-gi
+git clone https://github.com/farvisun/gnome-launcher.git
+cd gnome-launcher
+cargo build --release --locked
+python3 scripts/install.py</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="extensions">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow">Extensions</div>
+      <h2>Add your own commands.</h2>
+      <p class="sub">Extensions are small Node.js programs. A manifest lists the commands; your code returns lists, detail pages or forms. Lumen draws them with native widgets, and each extension runs in its own process with a timeout.</p>
+      <div class="code"><header><span>bash</span><button class="copy">Copy</button></header>
+<pre>node sdk/cli.mjs create ~/my-extension
+node sdk/cli.mjs build ~/my-extension ~/my-build
+gnome-launcher pack ~/my-build my.lumen-extension</pre></div>
+      <p class="note">Extensions run as your user and can access your files and network. Lumen shows you the package's declared capabilities before you install it, and never runs install scripts. <a href="https://github.com/farvisun/gnome-launcher/blob/main/sdk/README.md">Read the SDK guide →</a></p>
+    </div>
+    <div class="code"><header><span>index.mjs</span><button class="copy">Copy</button></header>
+<pre><span class="k">import</span> {serve, list, host} <span class="k">from</span> <span class="s">'@lumen/extension-sdk'</span>;
+
+<span class="k">const</span> links = [
+  {id: <span class="s">'gnome'</span>, title: <span class="s">'GNOME'</span>, url: <span class="s">'https://www.gnome.org/'</span>},
+  {id: <span class="s">'handbook'</span>, title: <span class="s">'Developer Handbook'</span>,
+   url: <span class="s">'https://developer.gnome.org/'</span>},
+];
+
+<span class="k">const</span> <span class="f">results</span> = ({query = <span class="s">''</span>}) =&gt; <span class="f">list</span>(
+  links
+    .<span class="f">filter</span>(l =&gt; l.title.<span class="f">toLowerCase</span>().<span class="f">includes</span>(query.<span class="f">toLowerCase</span>()))
+    .<span class="f">map</span>(({url, ...l}) =&gt; ({...l, icon: <span class="s">'web-browser-symbolic'</span>,
+      actions: [{id: <span class="s">'primary'</span>, title: <span class="s">'Open'</span>},
+                {id: <span class="s">'copy'</span>, title: <span class="s">'Copy URL'</span>}]})));
+
+<span class="f">serve</span>({links: {
+  run: results, query: results,
+  action: <span class="k">async</span> ({item, action}) =&gt; {
+    <span class="k">const</span> link = links.<span class="f">find</span>(l =&gt; l.id === item);
+    <span class="k">if</span> (action === <span class="s">'copy'</span>) <span class="k">await</span> host.<span class="f">copy</span>(link.url);
+    <span class="k">else</span> <span class="k">await</span> host.<span class="f">open</span>(link.url);
+  },
+}});</pre></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="assets/icon.svg" alt="">Lumen</a>
+    <span>MIT licensed · Made for GNOME · <a href="https://github.com/farvisun/gnome-launcher">github.com/farvisun/gnome-launcher</a></span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const root = document.documentElement;
+  const media = matchMedia('(prefers-color-scheme: dark)');
+  let saved = null;
+  try { saved = localStorage.getItem('lumen-theme'); } catch (e) {}
+  if (saved) root.dataset.theme = saved;
+  const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : media.matches;
+  const shot = document.getElementById('shot');
+  const caption = document.getElementById('caption');
+  let current = 'search';
+  const paint = () => { shot.src = `assets/lumen-${current}-${dark() ? 'dark' : 'light'}.png`; };
+  // Preload every screenshot so switching tabs never flashes.
+  for (const n of ['search', 'files', 'calculator', 'empty'])
+    for (const t of ['light', 'dark']) new Image().src = `assets/lumen-${n}-${t}.png`;
+  paint();
+  media.addEventListener('change', paint);
+  document.getElementById('theme').addEventListener('click', () => {
+    root.dataset.theme = dark() ? 'light' : 'dark';
+    try { localStorage.setItem('lumen-theme', root.dataset.theme); } catch (e) {}
+    paint();
+  });
+  document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t === tab));
+    current = tab.dataset.shot;
+    caption.textContent = tab.dataset.caption;
+    shot.alt = `Lumen launcher: ${tab.textContent}`;
+    paint();
+  }));
+  document.querySelectorAll('.copy').forEach(button => button.addEventListener('click', async () => {
+    const text = button.closest('.code').querySelector('pre').innerText
+      .split('\n').filter(line => !line.trim().startsWith('#')).join('\n').trim();
+    try { await navigator.clipboard.writeText(text); button.textContent = 'Copied'; }
+    catch (e) { button.textContent = 'Press Ctrl+C'; }
+    setTimeout(() => { button.textContent = 'Copy'; }, 1500);
+  }));
+})();
+</script>
+</body>
+</html>

@@ -34,20 +34,33 @@ Press **Super + Space**, type a few letters and press **Enter**. Lumen opens app
 
 ## Install
 
-Lumen is made for **Ubuntu 26.04** with **GNOME 50 on Wayland**.
+Lumen is made for **Ubuntu 26.04** with **GNOME 50 on Wayland**. Open a terminal and run:
 
-1. Download `lumen-launcher_0.1.0_amd64.deb` from the [latest release](https://github.com/farvisun/gnome-launcher/releases/latest).
-2. Install it and turn on its GNOME Shell part:
-   ```sh
-   sudo apt install ./lumen-launcher_0.1.0_amd64.deb
-   gnome-extensions enable lumen@gnome-launcher.local
-   ```
-3. **Log out and back in** once. Then press **Super + Space**.
+```sh
+curl -fsSL https://farvisun.github.io/gnome-launcher/install.sh | bash
+```
+
+Then **log out and back in** once, and press **Super + Space**.
+
+The script adds the signed [farvisun APT repository](https://farvisun.github.io/apt/), installs the `lumen-launcher` package, and turns on Lumen's GNOME Shell part. It asks for your password. From then on, Lumen updates with your normal system updates.
 
 > **Note:** Super + Space normally switches keyboard layouts. While Lumen is on, layout switching moves to **Super + Shift + Space**. Your original shortcut comes back if you turn Lumen off.
 
 <details>
-<summary><b>Install from source instead</b></summary>
+<summary><b>Install the package manually</b></summary>
+
+Download `lumen-launcher_<version>_amd64.deb` from the [latest release](https://github.com/farvisun/gnome-launcher/releases/latest), then:
+
+```sh
+sudo apt install ./lumen-launcher_*_amd64.deb
+gnome-extensions enable lumen@gnome-launcher.local
+```
+
+Log out and back in once. Manual installs do not update automatically.
+</details>
+
+<details>
+<summary><b>Install from source</b></summary>
 
 ```sh
 sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev localsearch libtinysparql-3.0-0 python3-gi
@@ -100,7 +113,7 @@ Lumen uses GNOME's file index. Make sure the folder is included in **Settings â†
 Open **Settings** (**Ctrl + ,**) and enter a new one, such as `<Super>space` or `<Control><Alt>space`.
 
 **How do I uninstall it?**
-Run `gnome-extensions disable lumen@gnome-launcher.local` first, so your keyboard-layout shortcut is restored, then `sudo apt remove lumen-launcher`.
+Run `curl -fsSL https://farvisun.github.io/gnome-launcher/install.sh | bash -s -- --uninstall`. It turns Lumen off first, which restores your keyboard-layout shortcut, then removes the package.
 
 ## Development
 

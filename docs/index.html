@@ -195,13 +195,13 @@ footer nav { position: static; background: none; border: 0; backdrop-filter: non
 
 <header class="hero" id="top">
   <div class="wrap">
-    <span class="pill"><b>v0.1.0</b> GNOME 50 · Wayland · Ubuntu 26.04</span>
+    <span class="pill"><b>v0.2.0</b> GNOME 50 · Wayland · Ubuntu 26.04</span>
     <h1>Everything on your desktop, <span>one keystroke away.</span></h1>
     <p class="lede">Lumen is a native command launcher for GNOME. Press <span class="combo"><kbd>Super</kbd> + <kbd>Space</kbd></span>, type a few letters, and open apps and files, do quick maths, or run extension commands.</p>
     <div class="cta">
-      <a class="btn primary" href="https://github.com/farvisun/gnome-launcher/releases/latest">
+      <a class="btn primary" href="#install">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M5 21h14"/></svg>
-        Download .deb
+        Install
       </a>
       <a class="btn" href="https://github.com/farvisun/gnome-launcher">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>
@@ -304,11 +304,10 @@ footer nav { position: static; background: none; border: 0; backdrop-filter: non
     </div>
     <div class="steps">
       <div>
-        <p class="step-title">Option 1 · Package <small>(Ubuntu 26.04, amd64)</small></p>
+        <p class="step-title">Option 1 · One command <small>(recommended, Ubuntu 26.04, amd64)</small></p>
         <div class="code"><header><span>bash</span><button class="copy">Copy</button></header>
-<pre><span class="c"># Download the .deb from the latest release, then:</span>
-sudo apt install ./lumen-launcher_0.1.0_amd64.deb
-gnome-extensions enable lumen@gnome-launcher.local</pre></div>
+<pre>curl -fsSL https://farvisun.github.io/gnome-launcher/install.sh | bash</pre></div>
+        <p class="note">Adds the signed <a href="https://farvisun.github.io/apt/">farvisun APT repository</a>, installs the package and turns on the shell integration. Updates then arrive with your normal system updates. Log out and back in once, then press <kbd>Super</kbd> + <kbd>Space</kbd>.</p>
       </div>
       <div>
         <p class="step-title">Option 2 · From source <small>(Rust 1.92+, Node 22+)</small></p>

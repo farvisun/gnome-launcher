@@ -50,6 +50,14 @@ install_template('lumen-autostart.desktop', config / 'autostart/lumen.desktop')
 icon = data / 'icons/hicolor/scalable/apps/io.github.gnomelauncher.Launcher.svg'
 icon.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(root / 'data/io.github.gnomelauncher.Launcher.svg', icon)
+# Built-in extensions sit beside the binary's prefix (~/.local), where Lumen looks
+# for them, and keep the repository layout so `../../sdk/index.mjs` resolves.
+builtin = destination.parent.parent / 'share/gnome-launcher/builtin'
+if builtin.exists():
+    shutil.rmtree(builtin)
+shutil.copytree(root / 'extensions', builtin / 'extensions', ignore=shutil.ignore_patterns('*.test.mjs'))
+(builtin / 'sdk').mkdir(parents=True)
+shutil.copy2(root / 'sdk/index.mjs', builtin / 'sdk/index.mjs')
 extension = data / 'gnome-shell/extensions/lumen@gnome-launcher.local'
 extension.mkdir(parents=True, exist_ok=True)
 shutil.copytree(root / 'shell', extension, dirs_exist_ok=True)

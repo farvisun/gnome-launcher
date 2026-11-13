@@ -35,4 +35,8 @@ for target in [binary, data / 'applications/io.github.gnomelauncher.Launcher.des
     target.unlink(missing_ok=True)
 if extension.exists():
     shutil.rmtree(extension)
+# Only the bundled extension code; user data and extension storage stay.
+builtin = home / '.local/share/gnome-launcher/builtin'
+if builtin.exists():
+    shutil.rmtree(builtin)
 print(f'Lumen uninstalled. Preferences and extension data retained at {data / "gnome-launcher"}.')

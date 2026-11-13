@@ -95,8 +95,9 @@ try:
     # Turn on the built-ins exercised below before the launcher reads its state.
     state_file = Path(os.environ['XDG_DATA_HOME']) / 'gnome-launcher/state.json'
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps({'enabled_builtins': ['lumen.password-generator', 'lumen.weather'],
-                                      'preferences': {'lumen.weather': {'defaultquery': 'Berlin', 'clockformat': '24h'}}}))
+    state_file.write_text(json.dumps({'enabled_builtins': ['lumen.password-generator', 'lumen.weather', 'lumen.sips'],
+                                      'preferences': {'lumen.weather': {'defaultquery': 'Berlin', 'clockformat': '24h'},
+                                                      'lumen.sips': {'inputMethod': 'Clipboard'}}}))
     app_log = (ROOT / 'dist/shell-app.log').open('w')
     app = subprocess.Popen([str(binary), '--background'], env=dict(os.environ, WAYLAND_DISPLAY='lumen-test', GDK_BACKEND='wayland', LUMEN_PROFILE='1', LUMEN_BUILTIN_DIR=str(ROOT / 'extensions')), stdout=app_log, stderr=subprocess.STDOUT)
     try:
@@ -223,6 +224,30 @@ try:
             .get_text(imports.gi.St.ClipboardType.CLIPBOARD, (_clipboard, text) => resolve(text)))''')
         assert copied and len(copied) == 16, f'Clipboard holds {copied!r}, not a 16-character password'
         print('PASS: a no-view command copies its password, closes Lumen and shows a HUD')
+        # Image Modification by keyboard: inline argument, clipboard image in, HUD and image out.
+        magick = os.environ.get('LUMEN_MAGICK') or shutil.which('magick')
+        if magick:
+            sample = Path(os.environ['XDG_DATA_HOME']) / 'clipboard-sample.png'
+            subprocess.run([magick, '-size', '40x20', 'gradient:red-blue', str(sample)], check=True)
+            shell_eval('''(() => {
+                const [, bytes] = imports.gi.GLib.file_get_contents(%s);
+                imports.gi.St.Clipboard.get_default().set_content(imports.gi.St.ClipboardType.CLIPBOARD, 'image/png', new imports.gi.GLib.Bytes(bytes));
+                return true;
+            })()''' % json.dumps(str(sample)))
+            group.activate_action('show', None)
+            for _ in range(5): spin()
+            type_query('Rotate Images')
+            press(0xff09)  # Tab moves into the Angle argument.
+            type_query('90')
+            press(0xff0d)
+            deadline = time.monotonic() + 15
+            while not stage_has_text('Rotated 1 image') and time.monotonic() < deadline: spin()
+            assert stage_has_text('Rotated 1 image'), (ROOT / 'dist/shell-app.log').read_text()[-3000:]
+            types = shell_eval('imports.gi.St.Clipboard.get_default().get_mimetypes(imports.gi.St.ClipboardType.CLIPBOARD)')
+            assert 'image/png' in types, types
+            print('PASS: a command argument typed inline rotates the clipboard image and puts the result back')
+        else:
+            print('NOTE: ImageMagick is not installed; skipped the Image Modification check')
         Gio.Settings.new_full(Gio.SettingsSchemaSource.new_from_directory(
             str(Path(os.environ['XDG_DATA_HOME']) / 'gnome-shell/extensions' / UUID / 'schemas'),
             Gio.SettingsSchemaSource.get_default(), False).lookup('org.gnome.shell.extensions.lumen', False),

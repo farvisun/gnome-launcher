@@ -1285,10 +1285,18 @@ impl Ui {
                 format!("{} (optional)", argument.placeholder)
             };
             let (widget, values): (gtk::Widget, Vec<String>) = if argument.kind == "dropdown" {
-                let titles: Vec<&str> = argument.data.iter().map(|c| c.title.as_str()).collect();
+                // An optional dropdown starts on its placeholder, meaning "not given".
+                let mut titles: Vec<&str> = Vec::new();
+                let mut values: Vec<String> = Vec::new();
+                if !argument.required {
+                    titles.push(&argument.placeholder);
+                    values.push(String::new());
+                }
+                titles.extend(argument.data.iter().map(|c| c.title.as_str()));
+                values.extend(argument.data.iter().map(|c| c.value.clone()));
                 let dropdown = gtk::DropDown::from_strings(&titles);
                 dropdown.set_tooltip_text(Some(&argument.placeholder));
-                (dropdown.upcast(), argument.data.iter().map(|c| c.value.clone()).collect())
+                (dropdown.upcast(), values)
             } else {
                 let entry = gtk::Entry::builder()
                     .placeholder_text(&placeholder)

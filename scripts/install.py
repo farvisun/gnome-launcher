@@ -58,6 +58,10 @@ if builtin.exists():
 shutil.copytree(root / 'extensions', builtin / 'extensions', ignore=shutil.ignore_patterns('*.test.mjs'))
 (builtin / 'sdk').mkdir(parents=True)
 shutil.copy2(root / 'sdk/index.mjs', builtin / 'sdk/index.mjs')
+# Files reports its selection to Image Modification through nautilus-python.
+nautilus = data / 'nautilus-python/extensions'
+nautilus.mkdir(parents=True, exist_ok=True)
+shutil.copy2(root / 'data/nautilus/lumen-images.py', nautilus / 'lumen-images.py')
 extension = data / 'gnome-shell/extensions/lumen@gnome-launcher.local'
 extension.mkdir(parents=True, exist_ok=True)
 shutil.copytree(root / 'shell', extension, dirs_exist_ok=True)

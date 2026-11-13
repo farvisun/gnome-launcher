@@ -1,0 +1,586 @@
+{
+  "id": "lumen.sips",
+  "name": "Image Modification",
+  "version": "1.0.0",
+  "sdk_version": 1,
+  "entry": "index.mjs",
+  "description": "Flip, rotate, resize, convert, filter and create images, on the selection in Files or the clipboard",
+  "capabilities": [
+    "clipboard",
+    "open",
+    "storage",
+    "filesystem",
+    "process"
+  ],
+  "preferences": [
+    {
+      "name": "inputMethod",
+      "type": "dropdown",
+      "title": "Image Input",
+      "description": "Where to obtain the image to modify.",
+      "default": "Files",
+      "data": [
+        {
+          "title": "Selection In Files",
+          "value": "Files"
+        },
+        {
+          "title": "Clipboard",
+          "value": "Clipboard"
+        }
+      ]
+    },
+    {
+      "name": "imageResultHandling",
+      "type": "dropdown",
+      "title": "Image Output",
+      "description": "How to handle the result of the image modification, i.e. where to save the modified image, or whether to copy it to the clipboard.",
+      "default": "replaceOriginal",
+      "data": [
+        {
+          "title": "Replace Original",
+          "value": "replaceOriginal"
+        },
+        {
+          "title": "Save In Containing Folder",
+          "value": "saveInContainingFolder"
+        },
+        {
+          "title": "Copy to Clipboard",
+          "value": "copyToClipboard"
+        },
+        {
+          "title": "Open in Image Viewer",
+          "value": "openInPreview"
+        },
+        {
+          "title": "Save To Downloads",
+          "value": "saveToDownloads"
+        },
+        {
+          "title": "Save to Desktop",
+          "value": "saveToDesktop"
+        }
+      ]
+    },
+    {
+      "name": "useLosslessConversion",
+      "type": "checkbox",
+      "title": "Image Operation Settings",
+      "label": "Lossless Conversions",
+      "description": "Whether to use lossless conversion when performing operations on WebP and AVIF images.",
+      "default": false
+    }
+  ],
+  "commands": [
+    {
+      "id": "flip-horizontally",
+      "title": "Flip Images Horizontally",
+      "subtitle": "Image Modification",
+      "icon": "object-flip-horizontal-symbolic",
+      "mode": "no-view",
+      "keywords": [
+        "flip",
+        "mirror",
+        "image",
+        "sips"
+      ]
+    },
+    {
+      "id": "flip-vertically",
+      "title": "Flip Images Vertically",
+      "subtitle": "Image Modification",
+      "icon": "object-flip-vertical-symbolic",
+      "mode": "no-view",
+      "keywords": [
+        "flip",
+        "mirror",
+        "image",
+        "sips"
+      ]
+    },
+    {
+      "id": "rotate",
+      "title": "Rotate Images",
+      "subtitle": "Image Modification",
+      "icon": "object-rotate-right-symbolic",
+      "mode": "no-view",
+      "keywords": [
+        "rotate",
+        "turn",
+        "image",
+        "sips"
+      ],
+      "arguments": [
+        {
+          "name": "angle",
+          "placeholder": "Angle",
+          "required": true
+        }
+      ],
+      "preferences": [
+        {
+          "name": "rotationUnit",
+          "type": "dropdown",
+          "title": "Rotation Unit",
+          "description": "The unit of the angle to rotate selected images by",
+          "default": "degrees",
+          "data": [
+            {
+              "title": "Degrees",
+              "value": "degrees"
+            },
+            {
+              "title": "Radians",
+              "value": "radians"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "convert",
+      "title": "Convert Images",
+      "subtitle": "Image Modification",
+      "icon": "view-refresh-symbolic",
+      "keywords": [
+        "convert",
+        "format",
+        "png",
+        "jpeg",
+        "webp",
+        "avif",
+        "image",
+        "sips"
+      ],
+      "preferences": [
+        {
+          "name": "showASTC",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show ASTC",
+          "description": "Offer ASTC in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showAVIF",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show AVIF",
+          "description": "Offer AVIF in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showBMP",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show BMP",
+          "description": "Offer BMP in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showDDS",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show DDS",
+          "description": "Offer DDS in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showEXR",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show EXR",
+          "description": "Offer EXR in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showGIF",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show GIF",
+          "description": "Offer GIF in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showHEIC",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show HEIC",
+          "description": "Offer HEIC in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showHEICS",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show HEICS",
+          "description": "Offer HEICS in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showICNS",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show ICNS",
+          "description": "Offer ICNS in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showICO",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show ICO",
+          "description": "Offer ICO in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showJPEG",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show JPEG",
+          "description": "Offer JPEG in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showJP2",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show JP2",
+          "description": "Offer JP2 in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showKTX",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show KTX",
+          "description": "Offer KTX in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showPBM",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show PBM",
+          "description": "Offer PBM in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showPDF",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show PDF",
+          "description": "Offer PDF in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showPNG",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show PNG",
+          "description": "Offer PNG in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showPSD",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show PSD",
+          "description": "Offer PSD in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showPVR",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show PVR",
+          "description": "Offer PVR in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showTGA",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show TGA",
+          "description": "Offer TGA in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showTIFF",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show TIFF",
+          "description": "Offer TIFF in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showWEBP",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show WEBP",
+          "description": "Offer WEBP in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "showSVG",
+          "type": "checkbox",
+          "title": "Formats",
+          "label": "Show SVG",
+          "description": "Offer SVG in the format list (when this computer can write it).",
+          "default": true
+        },
+        {
+          "name": "jpegExtension",
+          "type": "dropdown",
+          "title": "JPEG Extension",
+          "description": "The extension to use when converting to JPEG",
+          "default": "jpeg",
+          "data": [
+            {
+              "title": "jpg",
+              "value": "jpg"
+            },
+            {
+              "title": "jpeg",
+              "value": "jpeg"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resize",
+      "title": "Resize Images",
+      "subtitle": "Image Modification",
+      "icon": "zoom-fit-best-symbolic",
+      "mode": "no-view",
+      "keywords": [
+        "resize",
+        "width",
+        "height",
+        "image",
+        "sips"
+      ],
+      "arguments": [
+        {
+          "name": "width",
+          "placeholder": "Width"
+        },
+        {
+          "name": "height",
+          "placeholder": "Height"
+        }
+      ]
+    },
+    {
+      "id": "scale",
+      "title": "Scale Images",
+      "subtitle": "Image Modification",
+      "icon": "zoom-in-symbolic",
+      "mode": "no-view",
+      "keywords": [
+        "scale",
+        "resize",
+        "factor",
+        "image",
+        "sips"
+      ],
+      "arguments": [
+        {
+          "name": "scaleFactor",
+          "placeholder": "Scale Factor",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "pad",
+      "title": "Pad Images",
+      "subtitle": "Image Modification",
+      "icon": "view-fullscreen-symbolic",
+      "mode": "no-view",
+      "keywords": [
+        "pad",
+        "border",
+        "margin",
+        "image",
+        "sips"
+      ],
+      "arguments": [
+        {
+          "name": "amount",
+          "placeholder": "Amount",
+          "required": true
+        },
+        {
+          "name": "hexcolor",
+          "placeholder": "Color"
+        }
+      ],
+      "preferences": [
+        {
+          "name": "defaultPadColor",
+          "type": "textfield",
+          "title": "Default Pad Color",
+          "description": "The default color to use when padding images",
+          "default": "#FFFFFF"
+        }
+      ]
+    },
+    {
+      "id": "apply-filter",
+      "title": "Apply Image Filter",
+      "subtitle": "Image Modification",
+      "icon": "applications-graphics-symbolic",
+      "keywords": [
+        "filter",
+        "effect",
+        "blur",
+        "sepia",
+        "noir",
+        "image",
+        "sips"
+      ],
+      "preferences": [
+        {
+          "name": "showPreviews",
+          "type": "checkbox",
+          "title": "Filter Previews",
+          "label": "Generate Filter Previews",
+          "description": "Whether to show live previews of filters for selected files. Disabling this option might improve performance.",
+          "default": true
+        },
+        {
+          "name": "hiddenFilters",
+          "type": "textfield",
+          "title": "Hidden Filters",
+          "description": "Filters and filter categories to hide from the filter list. Separate multiple filters with commas. For example: 'Bloom, Distortion, Tonal'",
+          "default": ""
+        }
+      ]
+    },
+    {
+      "id": "optimize",
+      "title": "Optimize Images",
+      "subtitle": "Image Modification",
+      "icon": "document-save-symbolic",
+      "mode": "no-view",
+      "keywords": [
+        "optimize",
+        "compress",
+        "smaller",
+        "image",
+        "sips"
+      ],
+      "arguments": [
+        {
+          "name": "optimizationFactor",
+          "placeholder": "Power (0 to 100)"
+        }
+      ]
+    },
+    {
+      "id": "create-image",
+      "title": "Create New Image",
+      "subtitle": "Image Modification",
+      "icon": "insert-image-symbolic",
+      "keywords": [
+        "create",
+        "new",
+        "placeholder",
+        "pattern",
+        "gradient",
+        "image",
+        "sips"
+      ],
+      "preferences": [
+        {
+          "name": "generatePreviews",
+          "type": "checkbox",
+          "title": "Image Previews",
+          "label": "Generate Image Previews",
+          "description": "Whether to generate previews of images upon every use of the command. If disabled, the command will run faster, but the previews won't match the colors of the generated image.",
+          "default": true
+        }
+      ]
+    },
+    {
+      "id": "strip-exif",
+      "title": "Strip Exif Data",
+      "subtitle": "Image Modification",
+      "icon": "edit-clear-all-symbolic",
+      "mode": "no-view",
+      "keywords": [
+        "exif",
+        "metadata",
+        "privacy",
+        "gps",
+        "strip",
+        "image",
+        "sips"
+      ]
+    },
+    {
+      "id": "remove-bg",
+      "title": "Remove Background",
+      "subtitle": "Image Modification",
+      "icon": "edit-cut-symbolic",
+      "mode": "no-view",
+      "keywords": [
+        "background",
+        "remove",
+        "cutout",
+        "transparent",
+        "image",
+        "sips"
+      ],
+      "arguments": [
+        {
+          "name": "bgcolor",
+          "placeholder": "Replacement Color"
+        },
+        {
+          "name": "crop",
+          "placeholder": "Crop To Subject",
+          "type": "dropdown",
+          "data": [
+            {
+              "title": "Yes",
+              "value": "yes"
+            },
+            {
+              "title": "No",
+              "value": "no"
+            }
+          ]
+        }
+      ],
+      "preferences": [
+        {
+          "name": "defaultBgColor",
+          "type": "textfield",
+          "title": "Default Replacement Color",
+          "description": "The color to replace backgrounds with, in hex (e.g. #FF0000 or FF0000FF) or by name (e.g. red). Leave blank to make the background transparent. Used when the 'Replacement Color' argument is empty.",
+          "default": ""
+        },
+        {
+          "name": "cropByDefault",
+          "type": "checkbox",
+          "title": "Crop",
+          "label": "Crop By Default",
+          "description": "Crop images to the subject when the 'Crop To Subject' argument is not given.",
+          "default": true
+        },
+        {
+          "name": "preserveFormat",
+          "type": "checkbox",
+          "title": "Format",
+          "label": "Preserve Image Format",
+          "description": "Keep the original image format. When disabled, the result is saved as a PNG image.",
+          "default": true
+        }
+      ]
+    }
+  ]
+}

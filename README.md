@@ -34,6 +34,7 @@ Press **Super + Space**, type a few letters and press **Enter**. Lumen opens app
   - **Speedtest:** download, upload and ping through speed.cloudflare.com.
   - **Port Manager:** see and stop the programs listening on ports.
   - **Weather:** current conditions and a three-day forecast for any place from wttr.in, with an hourly view for each day and, if you like, the weather in the top bar.
+  - **Image Modification:** flip, rotate, resize, scale, pad, optimize, convert (WebP, AVIF, PNG, JPEG and more), strip EXIF data or remove the background of the images selected in Files, or of an image on the clipboard; apply 45 filters with live previews; create placeholder and pattern images. It needs ImageMagick (`sudo apt install imagemagick`), and `python3-nautilus` to see what is selected in Files. Remove Background uses [rembg](https://github.com/danielgatis/rembg) if it is installed. Raycast's quicklinks, "Paste in Active App" and PDF page editing are not included.
   - **Password Generator:** random passwords of 5–64 characters, or memorable ones such as `{word:capitalize}-{number:4}{symbol}`. *Copy Random Password* puts one on the clipboard without opening anything.
 - **Extensions.** Add your own commands, written in JavaScript or TypeScript.
 - **Private.** Your searches are never saved or sent anywhere. No account, no telemetry.

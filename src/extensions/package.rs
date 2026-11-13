@@ -622,6 +622,7 @@ mod tests {
             "lumen.port-manager",
             "lumen.password-generator",
             "lumen.weather",
+            "lumen.sips",
         ] {
             assert!(found.iter().any(|e| e.manifest.id == id && e.builtin), "{id}");
         }

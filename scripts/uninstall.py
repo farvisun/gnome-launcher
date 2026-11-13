@@ -36,6 +36,7 @@ for target in [binary, data / 'applications/io.github.gnomelauncher.Launcher.des
 if extension.exists():
     shutil.rmtree(extension)
 # Only the bundled extension code; user data and extension storage stay.
+(data / 'nautilus-python/extensions/lumen-images.py').unlink(missing_ok=True)
 builtin = home / '.local/share/gnome-launcher/builtin'
 if builtin.exists():
     shutil.rmtree(builtin)

@@ -125,6 +125,18 @@ h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -.025em; line-height: 1.
   background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
 .glyph svg { width: 20px; height: 20px; }
 
+.builtin .card { display: flex; flex-direction: column; }
+.builtin .card ul { margin: 14px 0 18px; padding: 0; list-style: none; color: var(--muted); font-size: 14.5px; }
+.builtin .card li { padding: 5px 0 5px 22px; position: relative; }
+.builtin .card li::before { content: ""; position: absolute; left: 4px; top: 13px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--mint); }
+.builtin .card .see { margin-top: auto; font-weight: 600; font-size: 14.5px; background: none; border: 0; padding: 0;
+  color: var(--accent); cursor: pointer; text-align: left; font-family: inherit; }
+.builtin .card .see:hover { text-decoration: underline; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; }
+.chip { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+  background: color-mix(in srgb, var(--chip) 15%, transparent); color: var(--chip); }
+
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: start; }
 table { width: 100%; border-collapse: collapse; font-size: 15px; background: var(--card);
   border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
@@ -182,6 +194,7 @@ footer nav { position: static; background: none; border: 0; backdrop-filter: non
     <a class="brand" href="#top"><img src="assets/icon.svg" alt="">Lumen</a>
     <div class="links">
       <a href="#features">Features</a>
+      <a href="#builtin">Built in</a>
       <a href="#keyboard">Keyboard</a>
       <a href="#install">Install</a>
       <a href="#extensions">Extensions</a>
@@ -197,7 +210,7 @@ footer nav { position: static; background: none; border: 0; backdrop-filter: non
   <div class="wrap">
     <span class="pill"><b>v0.2.0</b> GNOME 50 · Wayland · Ubuntu 26.04</span>
     <h1>Everything on your desktop, <span>one keystroke away.</span></h1>
-    <p class="lede">Lumen is a native command launcher for GNOME. Press <span class="combo"><kbd>Super</kbd> + <kbd>Space</kbd></span>, type a few letters, and open apps and files, do quick maths, or run extension commands.</p>
+    <p class="lede">Lumen is a native command launcher for GNOME. Press <span class="combo"><kbd>Super</kbd> + <kbd>Space</kbd></span>, type a few letters, and open apps and files, do quick maths, start timers, test your connection, or run extension commands.</p>
     <div class="cta">
       <a class="btn primary" href="#install">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-5-5m5 5l5-5M5 21h14"/></svg>
@@ -219,6 +232,9 @@ footer nav { position: static; background: none; border: 0; backdrop-filter: non
       <button class="tab" role="tab" aria-selected="false" data-shot="files" data-caption="File and folder names from GNOME's own index, with type icons and short paths.">Files</button>
       <button class="tab" role="tab" aria-selected="false" data-shot="calculator" data-caption="Type a calculation and press Enter to copy the answer.">Calculator</button>
       <button class="tab" role="tab" aria-selected="false" data-shot="empty" data-caption="When nothing matches, Lumen tells you what else you can search for.">No results</button>
+      <button class="tab" role="tab" aria-selected="false" data-shot="timers" data-caption="Type a duration to start a timer. Running timers count down live and ring even when Lumen is closed.">Timers</button>
+      <button class="tab" role="tab" aria-selected="false" data-shot="speedtest" data-caption="Download, upload and ping fill in live, with each transfer charted beside them.">Speed test</button>
+      <button class="tab" role="tab" aria-selected="false" data-shot="ports" data-caption="Every program listening on a port, coloured by who can reach it. Enter stops the program.">Ports</button>
     </div>
     <div class="frame">
       <img id="shot" src="assets/lumen-search-dark.png" width="720" height="480" alt="The Lumen launcher showing search results">
@@ -256,12 +272,58 @@ footer nav { position: static; background: none; border: 0; backdrop-filter: non
       <div class="card">
         <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 14L20 4M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></div>
         <h3>Extensions</h3>
-        <p>Write commands in JavaScript or TypeScript. Extensions can show lists, detail pages and forms, and can use the clipboard, notifications and storage.</p>
+        <p>Timers, a speed test and a port manager come built in. Write your own commands in JavaScript or TypeScript, with lists, detail panes and forms drawn natively.</p>
       </div>
       <div class="card">
         <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/></svg></div>
         <h3>Private</h3>
         <p>Your searches are never stored or sent anywhere. There's no telemetry, no cloud service and no account to sign in to.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block builtin" id="builtin">
+  <div class="wrap">
+    <div class="eyebrow">Built in</div>
+    <h2>Timers, speed tests and ports, ready to go.</h2>
+    <p class="sub">Three extensions ship with Lumen. They start turned off; switch on the ones you want in <b>Settings → Extensions</b>, and their commands appear in the palette.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M5 3 2 6M19 3l3 3"/></svg></div>
+        <h3>Timers</h3>
+        <ul>
+          <li>Type <code>25m tea</code>, <code>1h30m</code> or <code>1:30</code> to start one</li>
+          <li>Rings with a notification and sound, even when Lumen is closed</li>
+          <li>Pause, restart, rename, and save your own presets</li>
+          <li>Stopwatches, and a live countdown in the top bar</li>
+        </ul>
+        <div class="chips"><span class="chip" style="--chip: #c88800">Running</span><span class="chip" style="--chip: #e01b24">Paused</span></div>
+        <button class="see" data-show="timers">See it →</button>
+      </div>
+      <div class="card">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 18a9 9 0 1 1 15 0"/><path d="m12 14 4-5"/><circle cx="12" cy="14" r="1.2"/></svg></div>
+        <h3>Speed test</h3>
+        <ul>
+          <li>Download, upload, ping and jitter, measured live</li>
+          <li>A chart of every transfer and the stats behind each figure</li>
+          <li>What your connection can handle: calls, 4K streaming, gaming</li>
+          <li>Uses speed.cloudflare.com only when you run it; nothing to install</li>
+        </ul>
+        <div class="chips"><span class="chip" style="--chip: #3584e4">↓ Download</span><span class="chip" style="--chip: #9141ac">↑ Upload</span></div>
+        <button class="see" data-show="speedtest">See it →</button>
+      </div>
+      <div class="card">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div>
+        <h3>Port Manager</h3>
+        <ul>
+          <li>Every program listening on a port, with its PID and command line</li>
+          <li>Coloured by exposure: this computer only, or the whole network</li>
+          <li>Stop a program, or another user's with your administrator password</li>
+          <li>Give ports names, like <code>3000 API server</code></li>
+        </ul>
+        <div class="chips"><span class="chip" style="--chip: #26a269">This computer</span><span class="chip" style="--chip: #e66100">Network</span></div>
+        <button class="see" data-show="ports">See it →</button>
       </div>
     </div>
   </div>
@@ -328,7 +390,7 @@ python3 scripts/install.py</pre></div>
     <div>
       <div class="eyebrow">Extensions</div>
       <h2>Add your own commands.</h2>
-      <p class="sub">Extensions are small Node.js programs. A manifest lists the commands; your code returns lists, detail pages or forms. Lumen draws them with native widgets, and each extension runs in its own process with a timeout.</p>
+      <p class="sub">Extensions are small Node.js programs. A manifest lists the commands; your code returns lists, detail pages or forms. Lists can have sections, coloured tags, progress bars, a details pane with charts, and live updates. Lumen draws them all with native widgets, and each extension runs in its own process.</p>
       <div class="code"><header><span>bash</span><button class="copy">Copy</button></header>
 <pre>node sdk/cli.mjs create ~/my-extension
 node sdk/cli.mjs build ~/my-extension ~/my-build
@@ -382,7 +444,7 @@ gnome-launcher pack ~/my-build my.lumen-extension</pre></div>
   let current = 'search';
   const paint = () => { shot.src = `assets/lumen-${current}-${dark() ? 'dark' : 'light'}.png`; };
   // Preload every screenshot so switching tabs never flashes.
-  for (const n of ['search', 'files', 'calculator', 'empty'])
+  for (const n of ['search', 'files', 'calculator', 'empty', 'timers', 'speedtest', 'ports'])
     for (const t of ['light', 'dark']) new Image().src = `assets/lumen-${n}-${t}.png`;
   paint();
   media.addEventListener('change', paint);
@@ -397,6 +459,11 @@ gnome-launcher pack ~/my-build my.lumen-extension</pre></div>
     caption.textContent = tab.dataset.caption;
     shot.alt = `Lumen launcher: ${tab.textContent}`;
     paint();
+  }));
+  // "See it" buttons on the built-in cards jump to that screenshot.
+  document.querySelectorAll('.see').forEach(button => button.addEventListener('click', () => {
+    document.querySelector(`.tab[data-shot="${button.dataset.show}"]`).click();
+    document.querySelector('.showcase').scrollIntoView({behavior: 'smooth', block: 'start'});
   }));
   document.querySelectorAll('.copy').forEach(button => button.addEventListener('click', async () => {
     const text = button.closest('.code').querySelector('pre').innerText

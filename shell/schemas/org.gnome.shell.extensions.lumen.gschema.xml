@@ -9,5 +9,9 @@
       <default>''</default>
       <summary>Original and installed shortcut values for conditional restoration</summary>
     </key>
+    <key name="show-timer-indicator" type="b">
+      <default>true</default>
+      <summary>Show running Lumen timers in the top bar</summary>
+    </key>
   </schema>
 </schemalist>

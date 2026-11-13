@@ -7,6 +7,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {changedBindings, shouldRestore} from './shortcuts.js';
+import {TimerTray} from './timers.js';
 
 const APP = 'io.github.gnomelauncher.Launcher';
 const PATH = '/io/github/gnomelauncher/Launcher';
@@ -64,6 +65,8 @@ export default class Lumen extends Extension {
             }
         });
         for (const window of global.display.list_all_windows()) this._hideFromDock(window);
+        this._timers = new TimerTray(this._settings,
+            target => this._activate('run-command', [new GLib.Variant('s', target)]));
     }
     _animateIn(actor) {
         actor.remove_all_transitions();
@@ -163,7 +166,11 @@ export default class Lumen extends Extension {
             this._settings.set_string('shortcut-backup', ''); Gio.Settings.sync();
         } catch (error) { console.error(`Lumen could not restore shortcut journal: ${error}`); }
     }
-    async _toggle() {
+    _toggle() {
+        return this._activate('toggle', []);
+    }
+    /** Runs one of the launcher's GApplication actions, starting it first if needed. */
+    async _activate(action, parameters) {
         if (Main.overview.visible) Main.overview.hide();
         try {
             if (!this._launcherPid) {
@@ -180,7 +187,7 @@ export default class Lumen extends Extension {
             return;
         }
         if (!this._settings) return;
-        Gio.DBus.session.call(APP, PATH, 'org.gtk.Actions', 'Activate', new GLib.Variant('(sava{sv})', ['toggle', [], {}]), null, Gio.DBusCallFlags.NONE, 5000, null, (connection, result) => {
+        Gio.DBus.session.call(APP, PATH, 'org.gtk.Actions', 'Activate', new GLib.Variant('(sava{sv})', [action, parameters, {}]), null, Gio.DBusCallFlags.NONE, 5000, null, (connection, result) => {
             if (!this._settings) return;
             try {
                 connection.call_finish(result);
@@ -191,6 +198,8 @@ export default class Lumen extends Extension {
         });
     }
     disable() {
+        this._timers?.destroy();
+        this._timers = null;
         if (this._changed) this._settings.disconnect(this._changed);
         if (this._ownerWatch) Gio.bus_unwatch_name(this._ownerWatch);
         if (this._created) global.display.disconnect(this._created);

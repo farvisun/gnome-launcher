@@ -1,0 +1,15 @@
+{
+  "id": "lumen.timers",
+  "name": "Timers",
+  "version": "1.0.0",
+  "sdk_version": 1,
+  "entry": "index.mjs",
+  "description": "Countdown timers that ring even when Lumen is closed, plus stopwatches",
+  "capabilities": ["storage", "clipboard", "process"],
+  "commands": [
+    {"id": "start-timer", "title": "Start Timer", "icon": "alarm-symbolic", "keywords": ["countdown", "pomodoro", "alarm", "timer"]},
+    {"id": "manage-timers", "title": "Manage Timers", "icon": "alarm-symbolic", "keywords": ["running", "stop", "countdown", "timer"]},
+    {"id": "start-stopwatch", "title": "Start Stopwatch", "icon": "preferences-system-time-symbolic", "keywords": ["stopwatch", "elapsed", "track"]},
+    {"id": "manage-stopwatches", "title": "Manage Stopwatches", "icon": "preferences-system-time-symbolic", "keywords": ["stopwatch", "pause", "resume"]}
+  ]
+}

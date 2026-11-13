@@ -15,7 +15,30 @@ use std::{
 };
 
 const MAX_FRAME: u64 = 1024 * 1024;
-const TIMEOUT: Duration = Duration::from_secs(10);
+/// A request fails when the worker sends nothing for this long. Progress
+/// updates and host calls count as activity, so long tasks stay alive.
+#[cfg(not(test))]
+const IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const IDLE_TIMEOUT: Duration = Duration::from_millis(1000);
+/// No request may run longer than this, however chatty the worker is.
+#[cfg(not(test))]
+const MAX_REQUEST: Duration = Duration::from_secs(120);
+#[cfg(test)]
+const MAX_REQUEST: Duration = Duration::from_millis(3000);
+fn check_deadline(started: Instant, active: Instant) -> Result<()> {
+    ensure!(
+        started.elapsed() < MAX_REQUEST,
+        "Extension exceeded {} seconds",
+        MAX_REQUEST.as_secs()
+    );
+    ensure!(
+        active.elapsed() < IDLE_TIMEOUT,
+        "Extension did not respond for {} seconds",
+        IDLE_TIMEOUT.as_secs()
+    );
+    Ok(())
+}
 #[derive(Default)]
 pub struct Runtime {
     processes: Mutex<BTreeMap<String, Process>>,
@@ -91,7 +114,13 @@ impl Process {
             directory: ext.directory.clone(),
         })
     }
-    fn send(&mut self, value: &Value, cancelled: &AtomicBool, started: Instant) -> Result<()> {
+    fn send(
+        &mut self,
+        value: &Value,
+        cancelled: &AtomicBool,
+        started: Instant,
+        active: Instant,
+    ) -> Result<()> {
         let mut bytes = serde_json::to_vec(value)?;
         ensure!(
             bytes.len() < MAX_FRAME as usize,
@@ -101,10 +130,7 @@ impl Process {
         let mut offset = 0;
         while offset < bytes.len() {
             ensure!(!cancelled.load(Ordering::Relaxed), "Cancelled");
-            ensure!(
-                started.elapsed() < TIMEOUT,
-                "Extension timed out after 10 seconds"
-            );
+            check_deadline(started, active)?;
             match self.input.write(&bytes[offset..]) {
                 Ok(0) => bail!("Extension closed its input"),
                 Ok(count) => offset += count,
@@ -128,10 +154,12 @@ impl Process {
         let id = self.next_id;
         self.next_id += 1;
         let started = Instant::now();
+        let mut active = started;
         self.send(
             &json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
             cancelled,
             started,
+            active,
         )?;
         let mut messages = 0;
         loop {
@@ -142,12 +170,12 @@ impl Process {
                 let _ = self.input.write(notification.as_bytes());
                 bail!("Cancelled");
             }
-            ensure!(
-                started.elapsed() < TIMEOUT,
-                "Extension timed out after 10 seconds"
-            );
+            check_deadline(started, active)?;
             let value = match self.output.recv_timeout(Duration::from_millis(25)) {
-                Ok(v) => v,
+                Ok(v) => {
+                    active = Instant::now();
+                    v
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(_) => bail!("Extension exited or sent invalid protocol data; check its logs"),
             };
@@ -166,7 +194,7 @@ impl Process {
                             json!({"jsonrpc":"2.0", "id":value["id"], "error":{"code":-32000,"message":error.to_string()}})
                         }
                     };
-                    self.send(&response, cancelled, started)?;
+                    self.send(&response, cancelled, started, active)?;
                 }
             } else if value["id"] == id {
                 self.touched = Instant::now();
@@ -459,6 +487,50 @@ createInterface({input:process.stdin}).on('line',line=>{
                 .unwrap()["text"],
             "Recovered"
         );
+    }
+    fn worker(source: &str) -> (tempfile::TempDir, Extension) {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("worker.mjs"), source).unwrap();
+        let mut ext = super::super::package::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/quick-links"),
+        )
+        .unwrap();
+        ext.directory = root.path().to_owned();
+        ext.manifest.entry = "worker.mjs".into();
+        (root, ext)
+    }
+    const TICKING: &str = r#"
+import {createInterface} from 'node:readline';
+createInterface({input:process.stdin}).on('line',line=>{
+ const m=JSON.parse(line); let n=0;
+ const timer=setInterval(()=>{
+  if(++n<m.params.ticks){process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'view.update',params:{request_id:m.id,view:{type:'detail',text:String(n)}}})+'\n');return;}
+  clearInterval(timer);
+  process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{type:'detail',text:'Done'}})+'\n');
+ },m.params.every);
+});
+"#;
+    #[test]
+    fn progress_updates_extend_the_idle_timeout_up_to_the_hard_cap() {
+        let (_root, ext) = worker(TICKING);
+        let runtime = Runtime::default();
+        let run = |ticks: u32, every: u32| {
+            runtime.request(
+                &ext,
+                "command.run",
+                json!({"ticks":ticks,"every":every}),
+                Arc::new(AtomicBool::new(false)),
+                |_| {},
+            )
+        };
+        // Warm up so Node's start-up time does not count against the limits below.
+        run(1, 10).unwrap();
+        // Three 700 ms ticks outlast the 1 s idle limit only because each one is activity.
+        assert_eq!(run(3, 700).unwrap()["text"], "Done");
+        // A single silent 1.3 s gap is idle for too long.
+        assert!(run(1, 1300).is_err());
+        // Constant updates still stop at the 3 s cap.
+        assert!(run(20, 200).is_err());
     }
     #[test]
     fn cancels_when_worker_does_not_read_stdin() {

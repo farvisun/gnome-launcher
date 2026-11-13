@@ -80,7 +80,7 @@ Host methods:
 
 Storage is limited to 1 MiB per extension. Host methods resolve after validation and queuing; UI effects are performed on the GTK thread. Report errors by throwing an `Error`. Write diagnostics with `console.error`; `serve` redirects console log/info/debug to stderr to protect stdout.
 
-Requests time out after ten seconds. Cancelled, crashed, or malformed workers are terminated; idle workers are reaped after 60–90 seconds. Persist anything needed across worker restarts using storage. Avoid background tasks after returning from a handler. Observe the abort signal in network requests and other asynchronous work.
+A request fails after ten seconds without any message from the worker; every `update(view)` or host call restarts that clock, so long tasks should send progress updates. No request may run longer than two minutes. Cancelled, crashed, or malformed workers are terminated; idle workers are reaped after 60–90 seconds. Persist anything needed across worker restarts using storage. Avoid background tasks after returning from a handler. Observe the abort signal in network requests and other asynchronous work.
 
 ## Wire protocol
 

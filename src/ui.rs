@@ -62,6 +62,11 @@ pub struct Ui {
     action_button: gtk::MenuButton,
     pub(super) state: RefCell<Store>,
     apps: RefCell<Vec<Item>>,
+    /// Kept alive for the life of the window: GIO destroys the monitor, and stops
+    /// reporting installs and removals, as soon as its last reference is dropped.
+    app_monitor: gio::AppInfoMonitor,
+    /// Pending app list reload; package installs change many files in a burst.
+    app_reload: RefCell<Option<glib::SourceId>>,
     /// Apps, extension commands and built-ins; rebuilt only when one of them changes.
     catalog: RefCell<Option<Rc<Vec<Candidate>>>>,
     pub(super) extensions: RefCell<Vec<Extension>>,
@@ -279,6 +284,8 @@ impl Ui {
             primary_label,
             action_button,
             apps: RefCell::new(apps::installed()),
+            app_monitor: gio::AppInfoMonitor::get(),
+            app_reload: RefCell::default(),
             catalog: RefCell::default(),
             extensions: RefCell::new(extensions),
             state: RefCell::new(state),
@@ -416,14 +423,23 @@ impl Ui {
             }
         });
         let weak = Rc::downgrade(&ui);
-        gio::AppInfoMonitor::get().connect_changed(move |_| {
-            if let Some(ui) = weak.upgrade() {
+        ui.app_monitor.connect_changed(move |_| {
+            let Some(ui) = weak.upgrade() else { return };
+            if let Some(source) = ui.app_reload.borrow_mut().take() {
+                source.remove();
+            }
+            let weak = weak.clone();
+            let source = glib::timeout_add_local_once(Duration::from_millis(500), move || {
+                let Some(ui) = weak.upgrade() else { return };
+                ui.app_reload.borrow_mut().take();
+                // Listing the apps again also re-arms the monitor for the next change.
                 *ui.apps.borrow_mut() = apps::installed();
                 ui.catalog.borrow_mut().take();
                 if ui.active.borrow().is_none() {
                     ui.render_search();
                 }
-            }
+            });
+            *ui.app_reload.borrow_mut() = Some(source);
         });
         let runtime = ui.runtime.clone();
         glib::timeout_add_seconds_local(30, move || {

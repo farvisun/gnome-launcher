@@ -24,6 +24,9 @@ pub struct Manifest {
     #[serde(default)]
     pub capabilities: Vec<String>,
     pub commands: Vec<Command>,
+    /// Settings shared by every command, shown in Lumen's Settings.
+    #[serde(default)]
+    pub preferences: Vec<Preference>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +40,112 @@ pub struct Command {
     /// A GNOME icon name shown next to the command in search results.
     #[serde(default)]
     pub icon: String,
+    /// `view` (default) opens a view; `no-view` runs, then closes Lumen.
+    #[serde(default)]
+    pub mode: Mode,
+    /// Values typed beside the command in the root search, like Raycast arguments.
+    #[serde(default)]
+    pub arguments: Vec<Argument>,
+    #[serde(default)]
+    pub preferences: Vec<Preference>,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Mode {
+    #[default]
+    View,
+    NoView,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Choice {
+    pub title: String,
+    pub value: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Argument {
+    pub name: String,
+    #[serde(default)]
+    pub placeholder: String,
+    /// `text`, `password` or `dropdown`.
+    #[serde(default = "text_type", rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub data: Vec<Choice>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Preference {
+    pub name: String,
+    /// `textfield`, `password`, `checkbox` or `dropdown`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// The checkbox's own label.
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub default: Option<serde_json::Value>,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub data: Vec<Choice>,
+}
+fn text_type() -> String {
+    "text".into()
+}
+impl Preference {
+    /// The value used until the user sets one.
+    pub fn fallback(&self) -> serde_json::Value {
+        match (&self.default, self.kind.as_str()) {
+            (Some(value), _) => value.clone(),
+            (None, "checkbox") => false.into(),
+            (None, "dropdown") => self.data.first().map(|c| c.value.clone()).unwrap_or_default().into(),
+            _ => "".into(),
+        }
+    }
+}
+fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+}
+fn check_choices(data: &[Choice], dropdown: bool) -> Result<()> {
+    ensure!(data.len() <= 100, "Too many dropdown choices");
+    ensure!(!dropdown || !data.is_empty(), "A dropdown needs data");
+    for c in data {
+        ensure!(
+            !c.title.is_empty() && c.title.len() <= 120 && c.value.len() <= 200,
+            "Invalid dropdown choice"
+        );
+    }
+    Ok(())
+}
+fn check_preferences(preferences: &[Preference]) -> Result<()> {
+    ensure!(preferences.len() <= 40, "Too many preferences");
+    let mut names = BTreeSet::new();
+    for p in preferences {
+        ensure!(
+            valid_name(&p.name) && names.insert(&p.name),
+            "Invalid or duplicate preference name"
+        );
+        ensure!(
+            ["textfield", "password", "checkbox", "dropdown"].contains(&p.kind.as_str()),
+            "Unknown preference type: {}",
+            p.kind
+        );
+        ensure!(
+            !p.title.is_empty() && p.title.len() <= 120 && p.description.len() <= 500 && p.label.len() <= 120,
+            "Invalid preference title or description"
+        );
+        check_choices(&p.data, p.kind == "dropdown")?;
+    }
+    Ok(())
 }
 #[derive(Clone, Debug)]
 pub struct Extension {
@@ -129,7 +238,24 @@ pub fn load(directory: &Path) -> Result<Extension> {
             "Invalid command title"
         );
         ensure!(valid_icon(&command.icon), "Invalid command icon name");
+        ensure!(command.arguments.len() <= 3, "A command takes at most 3 arguments");
+        let mut names = BTreeSet::new();
+        for a in &command.arguments {
+            ensure!(
+                valid_name(&a.name) && names.insert(&a.name),
+                "Invalid or duplicate argument name"
+            );
+            ensure!(
+                ["text", "password", "dropdown"].contains(&a.kind.as_str()),
+                "Unknown argument type: {}",
+                a.kind
+            );
+            ensure!(a.placeholder.len() <= 60, "Argument placeholder is too long");
+            check_choices(&a.data, a.kind == "dropdown")?;
+        }
+        check_preferences(&command.preferences)?;
     }
+    check_preferences(&manifest.preferences)?;
     for cap in &manifest.capabilities {
         ensure!(
             [
@@ -458,6 +584,33 @@ mod tests {
         tar.append_data(&mut h, "link", std::io::empty()).unwrap();
         tar.into_inner().unwrap().finish().unwrap();
         assert!(unpack(&temp.path().join("bad.tgz"), &temp.path().join("stage")).is_err());
+    }
+    #[test]
+    fn manifest_preferences_and_arguments() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let write = |json: &str| {
+            fs::write(root.join("extension.json"), json).unwrap();
+            fs::write(root.join("index.mjs"), "export {};").unwrap();
+            load(root)
+        };
+        let ok = write(r#"{"id":"test.args","name":"Args","version":"1","sdk_version":1,"entry":"index.mjs",
+            "preferences":[{"name":"units","type":"dropdown","title":"Units","data":[{"title":"Metric","value":"metric"}]}],
+            "commands":[{"id":"rotate","title":"Rotate","mode":"no-view",
+              "arguments":[{"name":"angle","placeholder":"Angle","required":true}],
+              "preferences":[{"name":"radians","type":"checkbox","title":"Unit","label":"Use radians"}]}]}"#)
+        .unwrap();
+        let command = &ok.manifest.commands[0];
+        assert_eq!(command.mode, Mode::NoView);
+        assert_eq!(command.arguments[0].kind, "text");
+        assert_eq!(ok.manifest.preferences[0].fallback(), serde_json::json!("metric"));
+        assert_eq!(command.preferences[0].fallback(), serde_json::json!(false));
+        assert!(write(r#"{"id":"test.args","name":"Args","version":"1","sdk_version":1,"entry":"index.mjs",
+            "commands":[{"id":"a","title":"A","arguments":[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"}]}]}"#).is_err());
+        assert!(write(r#"{"id":"test.args","name":"Args","version":"1","sdk_version":1,"entry":"index.mjs",
+            "preferences":[{"name":"x","type":"slider","title":"X"}],"commands":[{"id":"a","title":"A"}]}"#).is_err());
+        assert!(write(r#"{"id":"test.args","name":"Args","version":"1","sdk_version":1,"entry":"index.mjs",
+            "commands":[{"id":"a","title":"A","mode":"menu-bar"}]}"#).is_err());
     }
     #[test]
     fn bundled_extensions_load() {

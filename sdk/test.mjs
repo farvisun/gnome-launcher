@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {once} from 'node:events';
-import {list, detail, form} from './index.mjs';
+import {list, detail, form, grid, push} from './index.mjs';
 
 test('view helpers produce the public wire format', () => {
   assert.deepEqual(list([{id:'one',title:'One'}]).items, [{id:'one',title:'One'}]);
   assert.equal(detail('Title','Body').text, 'Body');
   assert.equal(form('Title', []).submit_label, 'Submit');
+  assert.deepEqual(grid([], {columns: 4}), {type: 'grid', items: [], columns: 4});
+  assert.equal(push(list([])).push, true);
+  assert.equal(detail('T', 'B', {image: '/x.png'}).image, '/x.png');
 });
 test('SDK serves commands, host actions, and errors without corrupting stdout', async () => {
   const child = spawn(process.execPath, ['examples/quick-links/index.mjs'], {stdio: ['pipe','pipe','pipe']});

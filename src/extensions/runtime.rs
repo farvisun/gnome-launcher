@@ -39,6 +39,45 @@ fn check_deadline(started: Instant, active: Instant) -> Result<()> {
     );
     Ok(())
 }
+/// Host calls the GTK thread must answer (a file chooser, the clipboard)
+/// wait here for `answer`, keyed by the `ask` event's id.
+type Reply = mpsc::Sender<std::result::Result<Value, String>>;
+static ASKS: Mutex<BTreeMap<u64, Reply>> = Mutex::new(BTreeMap::new());
+static NEXT_ASK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+/// Delivers the GTK thread's answer to a waiting `ask` host call.
+pub fn answer(id: u64, result: std::result::Result<Value, String>) {
+    if let Some(reply) = ASKS.lock().ok().and_then(|mut asks| asks.remove(&id)) {
+        let _ = reply.send(result);
+    }
+}
+/// Emits an `ask` event and blocks until the GTK thread answers or the request
+/// is cancelled. The wait does not count towards the request's time limits.
+fn ask(
+    method: &str,
+    params: &Value,
+    cancelled: &AtomicBool,
+    event: &impl Fn(Value),
+) -> Result<Value> {
+    let id = NEXT_ASK.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = mpsc::channel();
+    ASKS.lock()
+        .map_err(|_| anyhow::anyhow!("Host unavailable"))?
+        .insert(id, tx);
+    event(json!({"type":"ask", "id":id, "method":method, "params":params}));
+    loop {
+        if cancelled.load(Ordering::Relaxed) {
+            if let Ok(mut asks) = ASKS.lock() {
+                asks.remove(&id);
+            }
+            bail!("Cancelled");
+        }
+        match rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(result) => return result.map_err(anyhow::Error::msg),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(_) => bail!("Host closed the request"),
+        }
+    }
+}
 #[derive(Default)]
 pub struct Runtime {
     processes: Mutex<BTreeMap<String, Process>>,
@@ -153,7 +192,7 @@ impl Process {
     ) -> Result<Value> {
         let id = self.next_id;
         self.next_id += 1;
-        let started = Instant::now();
+        let mut started = Instant::now();
         let mut active = started;
         self.send(
             &json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
@@ -187,7 +226,13 @@ impl Process {
                     validate_view(&value["params"]["view"])?;
                     event(json!({"type":"view", "view":value["params"]["view"]}));
                 } else if method.starts_with("host.") && !value["id"].is_null() {
-                    let result = host(ext, method, &value["params"], event);
+                    let asked = Instant::now();
+                    let result = host(ext, method, &value["params"], cancelled, event);
+                    // Time spent waiting for the user (a file chooser) is not the worker's.
+                    if ASKING.contains(&method) {
+                        started += asked.elapsed();
+                        active = Instant::now();
+                    }
                     let response = match result {
                         Ok(result) => json!({"jsonrpc":"2.0", "id":value["id"], "result":result}),
                         Err(error) => {
@@ -271,8 +316,21 @@ pub fn validate_view(view: &Value) -> Result<()> {
     if view.is_null() {
         return Ok(());
     }
+    ensure!(
+        view["push"].is_null() || view["push"].is_boolean(),
+        "push must be true or false"
+    );
+    ensure!(
+        view["selection"].is_null() || view["selection"].is_boolean(),
+        "selection must be true or false"
+    );
+    ensure!(
+        view["context"].is_null() || serde_json::to_vec(&view["context"])?.len() <= 4096,
+        "View context exceeds 4 KB"
+    );
+    optional_text(&view["title"], 200, "view title")?;
     match view["type"].as_str() {
-        Some("list") => {
+        Some(kind @ ("list" | "grid")) => {
             let items = view["items"].as_array().context("List needs items")?;
             ensure!(
                 items.len() <= 100,
@@ -289,12 +347,42 @@ pub fn validate_view(view: &Value) -> Result<()> {
                     item["title"].as_str().is_some_and(|s| s.len() <= 1000),
                     "Invalid item title"
                 );
-                validate_decoration(item)?;
+                optional_text(&item["subtitle"], 1000, "item subtitle")?;
+                if kind == "list" {
+                    if let Some(icon) = item["icon"].as_str().filter(|i| i.starts_with('/')) {
+                        valid_image(icon)?;
+                    }
+                    validate_decoration(item)?;
+                } else {
+                    optional_text(&item["section"], 100, "section")?;
+                    optional_text(&item["tooltip"], 300, "tooltip")?;
+                    let content = &item["content"];
+                    optional_color(&content["tint"])?;
+                    optional_text(&content["icon"], 100, "grid icon")?;
+                    if let Some(image) = content["image"].as_str() {
+                        valid_image(image)?;
+                    } else {
+                        ensure!(content["image"].is_null(), "Grid image must be a path");
+                    }
+                }
             }
             if let Some(refresh) = view.get("refresh") {
                 ensure!(
                     refresh.as_u64().is_some_and(|ms| (500..=60_000).contains(&ms)),
                     "List refresh must be 500–60000 ms"
+                );
+            }
+            if kind == "grid" {
+                ensure!(
+                    view["columns"].is_null()
+                        || view["columns"].as_u64().is_some_and(|c| (3..=8).contains(&c)),
+                    "Grid columns must be 3–8"
+                );
+                ensure!(
+                    view["aspect"].is_null()
+                        || ["1", "3/2", "2/3", "4/3", "3/4", "16/9", "9/16"]
+                            .contains(&view["aspect"].as_str().unwrap_or("")),
+                    "Grid aspect must be 1, 3/2, 2/3, 4/3, 3/4, 16/9 or 9/16"
                 );
             }
             optional_text(&view["placeholder"], 200, "placeholder")?;
@@ -306,6 +394,10 @@ pub fn validate_view(view: &Value) -> Result<()> {
                 view["text"].as_str().is_some_and(|s| s.len() <= 100_000),
                 "Detail requires text up to 100 KB"
             );
+            if let Some(image) = view["image"].as_str() {
+                valid_image(image)?;
+            }
+            validate_metadata(&view["metadata"])?;
         }
         Some("form") => {
             let fields = view["fields"].as_array().context("Form needs fields")?;
@@ -318,15 +410,67 @@ pub fn validate_view(view: &Value) -> Result<()> {
                         .is_some_and(|s| !s.is_empty() && s.len() <= 100 && ids.insert(s)),
                     "Invalid field ID"
                 );
+                let kind = field["type"].as_str().unwrap_or("text");
                 ensure!(
-                    ["text", "password", "boolean"]
-                        .contains(&field["type"].as_str().unwrap_or("text")),
+                    ["text", "password", "boolean", "dropdown", "description"].contains(&kind),
                     "Unsupported form field type"
                 );
                 ensure!(field["label"].is_string(), "Form field needs a label");
+                optional_text(&field["info"], 1000, "field info")?;
+                if kind == "description" {
+                    ensure!(
+                        field["text"].as_str().is_some_and(|t| t.len() <= 5000),
+                        "A description field needs text"
+                    );
+                }
+                if kind == "dropdown" {
+                    let options = field["options"].as_array().context("A dropdown needs options")?;
+                    ensure!(
+                        !options.is_empty()
+                            && options.len() <= 100
+                            && options.iter().all(|o| {
+                                o["value"].is_string()
+                                    && o["title"].as_str().is_some_and(|t| t.len() <= 200)
+                            }),
+                        "Dropdown options are 1–100 {{value, title}} pairs"
+                    );
+                }
             }
         }
-        _ => bail!("Expected a list, detail, form, or null view"),
+        _ => bail!("Expected a list, grid, detail, form, or null view"),
+    }
+    Ok(())
+}
+/// Images are local files only: no URLs, so a view cannot make Lumen fetch anything.
+fn valid_image(path: &str) -> Result<()> {
+    let path = std::path::Path::new(path);
+    ensure!(path.is_absolute(), "Image must be an absolute path");
+    let meta = std::fs::metadata(path)
+        .with_context(|| format!("Missing image {}", path.display()))?;
+    ensure!(
+        meta.is_file() && meta.len() <= 10 * 1024 * 1024,
+        "Image must be a file up to 10 MB"
+    );
+    Ok(())
+}
+fn validate_metadata(metadata: &Value) -> Result<()> {
+    if metadata.is_null() {
+        return Ok(());
+    }
+    let rows = metadata.as_array().context("Metadata must be a list")?;
+    ensure!(rows.len() <= 40, "At most 40 metadata rows");
+    for row in rows {
+        optional_text(&row["label"], 100, "metadata label")?;
+        optional_text(&row["text"], 2000, "metadata text")?;
+        optional_color(&row["color"])?;
+        for tag in row["tags"].as_array().into_iter().flatten().take(21) {
+            optional_text(&tag["text"], 60, "metadata tag")?;
+            optional_color(&tag["color"])?;
+        }
+        ensure!(
+            row["tags"].as_array().is_none_or(|t| t.len() <= 20),
+            "At most 20 tags per row"
+        );
     }
     Ok(())
 }
@@ -384,34 +528,75 @@ fn validate_decoration(item: &Value) -> Result<()> {
             "Chart needs up to 200 finite numbers"
         );
     }
-    if !detail["metadata"].is_null() {
-        let rows = detail["metadata"].as_array().context("Metadata must be a list")?;
-        ensure!(rows.len() <= 40, "At most 40 metadata rows");
-        for row in rows {
-            optional_text(&row["label"], 100, "metadata label")?;
-            optional_text(&row["text"], 2000, "metadata text")?;
-            optional_color(&row["color"])?;
-            for tag in row["tags"].as_array().into_iter().flatten().take(21) {
-                optional_text(&tag["text"], 60, "metadata tag")?;
-                optional_color(&tag["color"])?;
-            }
-            ensure!(row["tags"].as_array().is_none_or(|t| t.len() <= 20), "At most 20 tags per row");
-        }
+    if let Some(image) = detail["image"].as_str() {
+        valid_image(image)?;
     }
+    validate_metadata(&detail["metadata"])?;
     Ok(())
 }
-fn host(ext: &Extension, method: &str, params: &Value, event: &impl Fn(Value)) -> Result<Value> {
+/// Host methods answered by the GTK thread, possibly after the user acts.
+const ASKING: [&str; 2] = ["host.readClipboard", "host.chooseFiles"];
+fn host(
+    ext: &Extension,
+    method: &str,
+    params: &Value,
+    cancelled: &AtomicBool,
+    event: &impl Fn(Value),
+) -> Result<Value> {
     let required = match method {
-        "host.copy" => "clipboard",
-        "host.open" => "open",
-        "host.notify" => "notifications",
-        "host.storage.get" | "host.storage.set" => "storage",
+        "host.copy" | "host.copyFile" | "host.readClipboard" => Some("clipboard"),
+        "host.open" => Some("open"),
+        "host.notify" => Some("notifications"),
+        "host.storage.get" | "host.storage.set" => Some("storage"),
+        "host.toast" | "host.hud" | "host.closeWindow" | "host.openPreferences"
+        | "host.chooseFiles" => None,
         _ => bail!("Unknown host method"),
     };
-    ensure!(
-        ext.manifest.capabilities.iter().any(|c| c == required),
-        "Undeclared capability: {required}"
-    );
+    if let Some(required) = required {
+        ensure!(
+            ext.manifest.capabilities.iter().any(|c| c == required),
+            "Undeclared capability: {required}"
+        );
+    }
+    match method {
+        "host.readClipboard" => return ask(method, params, cancelled, event),
+        "host.chooseFiles" => {
+            optional_text(&params["title"], 200, "chooser title")?;
+            ensure!(
+                params["mimeTypes"].as_array().is_none_or(|m| m.len() <= 40 && m.iter().all(Value::is_string)),
+                "mimeTypes must be a list of strings"
+            );
+            return ask(method, params, cancelled, event);
+        }
+        "host.toast" => {
+            ensure!(
+                params["title"].as_str().is_some_and(|t| t.len() <= 200),
+                "A toast needs a title"
+            );
+            optional_text(&params["message"], 1000, "toast message")?;
+            ensure!(
+                params["style"].is_null()
+                    || ["success", "failure", "animated"].contains(&params["style"].as_str().unwrap_or("")),
+                "Toast style is success, failure or animated"
+            );
+            event(json!({"type":"effect", "method":method, "params":params}));
+            return Ok(Value::Null);
+        }
+        "host.closeWindow" | "host.openPreferences" => {
+            event(json!({"type":"effect", "method":method, "params":{}}));
+            return Ok(Value::Null);
+        }
+        "host.copyFile" => {
+            let path = params["path"].as_str().context("Missing path")?;
+            ensure!(
+                std::path::Path::new(path).is_absolute() && std::path::Path::new(path).is_file(),
+                "copyFile needs an absolute path to a file"
+            );
+            event(json!({"type":"effect", "method":method, "params":{"path":path}}));
+            return Ok(Value::Null);
+        }
+        _ => {}
+    }
     if method.starts_with("host.storage.") {
         let path = crate::store::data_dir()
             .join("extension-storage")
@@ -435,6 +620,7 @@ fn host(ext: &Extension, method: &str, params: &Value, event: &impl Fn(Value)) -
     } else {
         let text = params["text"].as_str().context("Missing text")?;
         ensure!(text.len() <= 100_000, "Host action exceeds size limit");
+        // host.hud: shown by the shell after Lumen closes.
         if method == "host.open" {
             ensure!(
                 ["https://", "http://", "file://", "mailto:"]
@@ -474,6 +660,31 @@ mod tests {
         let mut bad = rich;
         bad["refresh"] = json!(10);
         assert!(validate_view(&bad).is_err());
+    }
+    #[test]
+    fn validates_grids_images_and_forms() {
+        let image = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/assets/lumen-timers-light.png");
+        let image = image.to_str().unwrap();
+        let grid = json!({"type":"grid","columns":5,"aspect":"1","push":true,"context":{"day":"x"},"selection":true,
+            "items":[{"id":"a","title":"Blur","section":"Blur","content":{"image":image}},{"id":"b","title":"Icon","content":{"icon":"weather-clear-symbolic","tint":"yellow"}}]});
+        assert!(validate_view(&grid).is_ok());
+        let mut bad = grid.clone();
+        bad["items"][0]["content"]["image"] = json!("https://example.com/a.png");
+        assert!(validate_view(&bad).is_err());
+        let mut bad = grid.clone();
+        bad["columns"] = json!(12);
+        assert!(validate_view(&bad).is_err());
+        let mut bad = grid;
+        bad["context"] = json!("x".repeat(5000));
+        assert!(validate_view(&bad).is_err());
+        assert!(validate_view(&json!({"type":"list","items":[{"id":"a","title":"A","icon":image,"detail":{"image":image}}]})).is_ok());
+        assert!(validate_view(&json!({"type":"list","items":[{"id":"a","title":"A","icon":"/no/such.png"}]})).is_err());
+        let form = json!({"type":"form","title":"F","fields":[
+            {"id":"f","label":"Format","type":"dropdown","options":[{"value":"png","title":"PNG"}],"info":"Pick one"},
+            {"id":"d","label":"","type":"description","text":"Help"}]});
+        assert!(validate_view(&form).is_ok());
+        assert!(validate_view(&json!({"type":"form","fields":[{"id":"f","label":"F","type":"dropdown"}]})).is_err());
+        assert!(validate_view(&json!({"type":"detail","text":"x","image":image,"metadata":[{"label":"A","text":"b"}]})).is_ok());
     }
     #[test]
     fn runs_sample_and_survives_a_crash() {

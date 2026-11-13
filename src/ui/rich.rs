@@ -9,7 +9,7 @@ pub const COLORS: &[&str] = &[
     "red", "orange", "yellow", "green", "blue", "purple", "accent", "dim",
 ];
 
-fn tint(widget: &impl IsA<gtk::Widget>, color: &Value) {
+pub(super) fn tint(widget: &impl IsA<gtk::Widget>, color: &Value) {
     if let Some(color) = color.as_str().filter(|c| COLORS.contains(c)) {
         widget.add_css_class(&format!("tint-{color}"));
     }
@@ -89,6 +89,9 @@ pub fn fill_detail(pane: &gtk::Box, item: &Value) {
         .build();
     title.add_css_class("side-title");
     pane.append(&title);
+    if let Some(path) = detail["image"].as_str() {
+        pane.append(&picture(path, 248, 186));
+    }
     let hero = &detail["hero"];
     if let Some(value) = hero["value"].as_str() {
         let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -146,7 +149,25 @@ pub fn fill_detail(pane: &gtk::Box, item: &Value) {
         body.add_css_class("side-text");
         pane.append(&body);
     }
-    let rows = detail["metadata"].as_array().into_iter().flatten().take(40);
+    if let Some(grid) = metadata_grid(&detail["metadata"]) {
+        pane.append(&grid);
+    }
+}
+
+/// A local image scaled to fit `width`×`height`, keeping its aspect ratio.
+pub(super) fn picture(path: &str, width: i32, height: i32) -> gtk::Picture {
+    let picture = gtk::Picture::for_filename(path);
+    picture.set_content_fit(gtk::ContentFit::Contain);
+    picture.set_can_shrink(true);
+    picture.set_size_request(width, height);
+    picture.set_halign(gtk::Align::Center);
+    picture.add_css_class("detail-image");
+    picture
+}
+
+/// Label/value rows, separators and tag rows, as Raycast's metadata.
+pub(super) fn metadata_grid(metadata: &Value) -> Option<gtk::Grid> {
+    let rows = metadata.as_array().into_iter().flatten().take(40);
     let grid = gtk::Grid::builder().column_spacing(12).row_spacing(6).build();
     grid.add_css_class("metadata");
     let mut line = 0;
@@ -198,9 +219,7 @@ pub fn fill_detail(pane: &gtk::Box, item: &Value) {
         grid.attach(&value, 1, line, 1, 1);
         line += 1;
     }
-    if line > 0 {
-        pane.append(&grid);
-    }
+    (line > 0).then_some(grid)
 }
 
 /// A small line chart of recent samples, drawn in the widget's CSS colour.

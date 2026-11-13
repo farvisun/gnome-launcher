@@ -6,13 +6,15 @@ const pending = new Map();
 let serial = 0;
 let send = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 
-function call(method, params) {
+/** `wait` is how long the host may take; null waits for the user (a file chooser). */
+function call(method, params, wait = 8000) {
   const request = scope.getStore();
   if (!request) return Promise.reject(new Error('Host calls require an active command request'));
   if (request.signal.aborted) return Promise.reject(new Error('Cancelled'));
   const id = `host:${++serial}`;
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error('Host request timed out')); }, 8000);
+    const timer = wait == null ? null : setTimeout(() => { pending.delete(id); reject(new Error('Host request timed out')); }, wait);
+    request.signal.addEventListener('abort', () => { if (pending.delete(id)) { clearTimeout(timer); reject(new Error('Cancelled')); } }, {once: true});
     pending.set(id, {resolve, reject, timer});
     send({jsonrpc: '2.0', id, method, params});
   });
@@ -22,6 +24,19 @@ export const host = Object.freeze({
   open: text => call('host.open', {text}),
   notify: text => call('host.notify', {text}),
   storage: Object.freeze({get: key => call('host.storage.get', {key}), set: (key, value) => call('host.storage.set', {key, value})}),
+  /** Status-line toast: style is 'success', 'failure' or 'animated' (with a spinner). */
+  toast: ({style = 'success', title, message} = {}) => call('host.toast', {style, title, message}),
+  /** Raycast's HUD: Lumen closes when the request ends and the Shell shows `text`. */
+  hud: text => call('host.hud', {text}),
+  /** Close Lumen once the current request ends. */
+  closeWindow: () => call('host.closeWindow', {}),
+  openPreferences: () => call('host.openPreferences', {}),
+  /** `{files}` copied in Files, `{image}` (a PNG path) for pixels, `{text}`, or `{}`. */
+  readClipboard: () => call('host.readClipboard', {}, null),
+  /** Puts a file on the clipboard, with its pixels when it is an image. */
+  copyFile: path => call('host.copyFile', {path}),
+  /** Opens a file chooser; resolves to `{files: [paths]}`, empty when cancelled. */
+  chooseFiles: ({title, mimeTypes, multiple = true, filterName} = {}) => call('host.chooseFiles', {title, mimeTypes, multiple, filterName}, null),
 });
 export function update(view) {
   const request = scope.getStore();
@@ -32,7 +47,12 @@ export function update(view) {
 export function list(items, options) {
   return typeof options === 'object' && options !== null ? {type: 'list', items, ...options} : {type: 'list', items, title: options};
 }
-export function detail(title, text) { return {type: 'detail', title, text}; }
+/** `options` is {title, placeholder, columns (3–8), aspect ('1', '3/2', …), empty, refresh, selection, context}. */
+export function grid(items, options = {}) { return {type: 'grid', items, ...options}; }
+/** Shows `view` over the current one; Esc returns. Only actions and submits may push. */
+export function push(view) { return {...view, push: true}; }
+/** `options` may add an `image` path and `metadata` rows below the text. */
+export function detail(title, text, options = {}) { return {type: 'detail', title, text, ...options}; }
 export function form(title, fields, submit_label = 'Submit') { return {type: 'form', title, fields, submit_label}; }
 
 export function serve(commands) {
@@ -58,7 +78,7 @@ export function serve(commands) {
       const params = message.params ?? {};
       const command = commands[params.command];
       if (!command) throw new Error(`Unknown command: ${params.command}`);
-      const handler = { 'command.run': command.run, 'command.query': command.query ?? command.run, 'command.action': command.action, 'command.submit': command.submit }[message.method];
+      const handler = { 'command.run': command.run, 'command.query': command.query ?? command.run, 'command.action': command.action, 'command.submit': command.submit, 'command.select': command.select ?? (() => null) }[message.method];
       if (!handler) throw new Error(`Unsupported command method: ${message.method}`);
       const result = await scope.run({id: message.id, signal: controller.signal}, () => handler({...params, signal: controller.signal}));
       if (!controller.signal.aborted) send({jsonrpc: '2.0', id: message.id, result: result ?? null});

@@ -59,6 +59,10 @@ fn builtin_subtitle(ext: &Extension) -> String {
         .collect();
     format!("{}\nCommands: {}", ext.manifest.description, commands.join(", "))
 }
+fn has_preferences(ext: &Extension) -> bool {
+    !ext.manifest.preferences.is_empty()
+        || ext.manifest.commands.iter().any(|c| !c.preferences.is_empty())
+}
 impl Ui {
     pub(super) fn open_settings(self: &Rc<Self>) {
         if let Some(window) = self
@@ -246,8 +250,10 @@ impl Ui {
 
         let extensions_page = adw::PreferencesPage::builder()
             .title("Extensions")
+            .name("extensions")
             .icon_name("application-x-addon-symbolic")
             .build();
+        self.settings_rows.borrow_mut().clear();
         extensions_page.add(&self.builtin_group());
         let install = adw::PreferencesGroup::builder().title("Install an extension").description("Choose a .lumen-extension package or paste its HTTPS URL. Review its source and capabilities before enabling it.").build();
         let source = adw::EntryRow::builder()
@@ -421,6 +427,28 @@ impl Ui {
             installed.add(&row);
         }
         extensions_page.add(&installed);
+        let configurable: Vec<Extension> = self
+            .extensions
+            .borrow()
+            .iter()
+            .filter(|e| !e.builtin && has_preferences(e))
+            .cloned()
+            .collect();
+        if !configurable.is_empty() {
+            let group = adw::PreferencesGroup::builder().title("Extension preferences").build();
+            for ext in configurable {
+                let row = adw::ExpanderRow::builder()
+                    .use_markup(false)
+                    .title(&ext.manifest.name)
+                    .build();
+                for pref in self.preference_rows(&ext) {
+                    row.add_row(&pref);
+                }
+                self.settings_rows.borrow_mut().push((ext.manifest.id.clone(), row.clone()));
+                group.add(&row);
+            }
+            extensions_page.add(&group);
+        }
         let developer = adw::PreferencesGroup::builder().title("Develop extensions").description("Load a local project containing extension.json. Developer folders are trusted local programs and are never deleted by Lumen.").build();
         let folder = adw::EntryRow::builder()
             .title("Developer project folder")
@@ -452,6 +480,108 @@ impl Ui {
         window.add(&extensions_page);
         *self.settings_window.borrow_mut() = Some(window.clone());
         window.present();
+    }
+    /// Opens Settings at an extension's preferences.
+    pub(super) fn open_settings_at(self: &Rc<Self>, id: &str) {
+        self.open_settings();
+        let Some(window) = self.settings_window.borrow().clone() else { return };
+        window.set_visible_page_name("extensions");
+        if let Some((_, row)) = self.settings_rows.borrow().iter().find(|(e, _)| e == id) {
+            row.set_expanded(true);
+            row.grab_focus();
+        }
+    }
+    /// One row per manifest preference, saved as soon as it changes. Command
+    /// preferences follow a heading row with the command's title.
+    fn preference_rows(self: &Rc<Self>, ext: &Extension) -> Vec<gtk::Widget> {
+        let mut rows: Vec<gtk::Widget> = Vec::new();
+        let id = &ext.manifest.id;
+        let scopes = std::iter::once((id.clone(), None, &ext.manifest.preferences)).chain(
+            ext.manifest
+                .commands
+                .iter()
+                .filter(|c| !c.preferences.is_empty())
+                .map(|c| (format!("{id}/{}", c.id), Some(c.title.clone()), &c.preferences)),
+        );
+        for (key, heading, preferences) in scopes {
+            if preferences.is_empty() {
+                continue;
+            }
+            if let Some(heading) = heading {
+                let row = adw::ActionRow::builder().use_markup(false).title(&heading).activatable(false).build();
+                row.add_css_class("preference-heading");
+                rows.push(row.upcast());
+            }
+            for pref in preferences {
+                let current = self
+                    .state
+                    .borrow()
+                    .preferences
+                    .get(&key)
+                    .and_then(|m| m.get(&pref.name))
+                    .cloned()
+                    .unwrap_or_else(|| pref.fallback());
+                let weak = Rc::downgrade(self);
+                let (key, name, ext_id) = (key.clone(), pref.name.clone(), id.clone());
+                let save = move |value: Value| {
+                    let Some(ui) = weak.upgrade() else { return };
+                    ui.state
+                        .borrow_mut()
+                        .preferences
+                        .entry(key.clone())
+                        .or_default()
+                        .insert(name.clone(), value);
+                    ui.persist();
+                    ui.runtime.stop(&ext_id);
+                };
+                let title = if pref.required { format!("{} (required)", pref.title) } else { pref.title.clone() };
+                let row: gtk::Widget = match pref.kind.as_str() {
+                    "checkbox" => {
+                        let row = adw::SwitchRow::builder()
+                            .use_markup(false)
+                            .title(if pref.label.is_empty() { &title } else { &pref.label })
+                            .subtitle(if pref.label.is_empty() { &pref.description } else { &title })
+                            .active(current.as_bool().unwrap_or(false))
+                            .build();
+                        row.connect_active_notify(move |row| save(json!(row.is_active())));
+                        row.upcast()
+                    }
+                    "dropdown" => {
+                        let titles: Vec<&str> = pref.data.iter().map(|c| c.title.as_str()).collect();
+                        let values: Vec<String> = pref.data.iter().map(|c| c.value.clone()).collect();
+                        let row = adw::ComboRow::builder()
+                            .use_markup(false)
+                            .title(&title)
+                            .subtitle(&pref.description)
+                            .model(&gtk::StringList::new(&titles))
+                            .build();
+                        if let Some(at) = values.iter().position(|v| current == **v) {
+                            row.set_selected(at as u32);
+                        }
+                        row.connect_selected_notify(move |row| {
+                            if let Some(value) = values.get(row.selected() as usize) {
+                                save(json!(value));
+                            }
+                        });
+                        row.upcast()
+                    }
+                    kind => {
+                        let row: adw::EntryRow = if kind == "password" {
+                            adw::PasswordEntryRow::builder().title(&title).build().upcast()
+                        } else {
+                            adw::EntryRow::builder().title(&title).build()
+                        };
+                        row.set_text(current.as_str().unwrap_or(""));
+                        row.set_tooltip_text(Some(&pref.description).filter(|d| !d.is_empty()).map(String::as_str));
+                        row.set_show_apply_button(true);
+                        row.connect_apply(move |row| save(json!(row.text().as_str())));
+                        row.upcast()
+                    }
+                };
+                rows.push(row);
+            }
+        }
+        rows
     }
     /// Extensions that ship with Lumen. They start off; turning one on
     /// only adds its commands to the palette.
@@ -499,7 +629,22 @@ impl Ui {
                 ui.persist();
                 ui.refresh_extensions();
             };
-            if ext.manifest.id == "lumen.timers" {
+            let indicator = match ext.manifest.id.as_str() {
+                "lumen.timers" => Some((
+                    "show-timer-indicator",
+                    "Show countdown in the top bar",
+                    "Shows the next timer to finish while timers are running.",
+                    "Install the GNOME Shell integration to show timers in the top bar.",
+                )),
+                "lumen.weather" => Some((
+                    "show-weather-indicator",
+                    "Show weather in the top bar",
+                    "The current conditions, refreshed every 30 minutes, with the forecast in its menu.",
+                    "Install the GNOME Shell integration to show the weather in the top bar.",
+                )),
+                _ => None,
+            };
+            if indicator.is_some() || has_preferences(&ext) {
                 let row = adw::ExpanderRow::builder()
                     .use_markup(false)
                     .title(&ext.manifest.name)
@@ -508,27 +653,24 @@ impl Ui {
                     .enable_expansion(enabled)
                     .build();
                 row.connect_enable_expansion_notify(move |row| set(row.enables_expansion()));
-                let indicator = adw::SwitchRow::builder()
-                    .title("Show countdown in the top bar")
-                    .subtitle("Shows the next timer to finish while timers are running.")
-                    .build();
-                match shortcut_settings()
-                    .filter(|s| s.settings_schema().is_some_and(|k| k.has_key("show-timer-indicator")))
-                {
-                    Some(settings) => {
+                if let Some((key, title, about, missing)) = indicator {
+                    let switch = adw::SwitchRow::builder().title(title).subtitle(about).build();
+                    match shortcut_settings()
+                        .filter(|s| s.settings_schema().is_some_and(|k| k.has_key(key)))
+                    {
                         // The binding holds its own reference to the settings object.
-                        settings
-                            .bind("show-timer-indicator", &indicator, "active")
-                            .build();
+                        Some(settings) => settings.bind(key, &switch, "active").build(),
+                        None => {
+                            switch.set_sensitive(false);
+                            switch.set_subtitle(missing);
+                        }
                     }
-                    None => {
-                        indicator.set_sensitive(false);
-                        indicator.set_subtitle(
-                            "Install the GNOME Shell integration to show timers in the top bar.",
-                        );
-                    }
+                    row.add_row(&switch);
                 }
-                row.add_row(&indicator);
+                for pref in self.preference_rows(&ext) {
+                    row.add_row(&pref);
+                }
+                self.settings_rows.borrow_mut().push((ext.manifest.id.clone(), row.clone()));
                 group.add(&row);
             } else {
                 let row = adw::SwitchRow::builder()

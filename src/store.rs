@@ -36,6 +36,9 @@ pub struct Store {
     /// Built-in extensions are opt-in, so they are tracked separately from
     /// `disabled`, which lists the installed extensions a user turned off.
     pub enabled_builtins: BTreeSet<String>,
+    /// Extension preferences the user set, keyed by `ext` for the extension's
+    /// own and `ext/cmd` for a command's. Unset keys fall back to the manifest.
+    pub preferences: BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 impl Store {
     pub fn is_enabled(&self, ext: &crate::extensions::package::Extension) -> bool {
@@ -44,6 +47,45 @@ impl Store {
         } else {
             !self.disabled.contains(&ext.manifest.id)
         }
+    }
+    /// The extension's and the command's preferences merged, with defaults applied.
+    pub fn preference_values(
+        &self,
+        ext: &crate::extensions::package::Extension,
+        command: &str,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let mut values = serde_json::Map::new();
+        let id = &ext.manifest.id;
+        let scopes = std::iter::once((id.clone(), &ext.manifest.preferences)).chain(
+            ext.manifest
+                .commands
+                .iter()
+                .filter(|c| c.id == command)
+                .map(|c| (format!("{id}/{}", c.id), &c.preferences)),
+        );
+        for (key, preferences) in scopes {
+            let set = self.preferences.get(&key);
+            for p in preferences {
+                let value = set.and_then(|m| m.get(&p.name)).cloned().unwrap_or_else(|| p.fallback());
+                values.insert(p.name.clone(), value);
+            }
+        }
+        values
+    }
+    /// The title of a required preference that is still empty, if any.
+    pub fn missing_preference(
+        &self,
+        ext: &crate::extensions::package::Extension,
+        command: &str,
+    ) -> Option<String> {
+        let values = self.preference_values(ext, command);
+        let command = ext.manifest.commands.iter().find(|c| c.id == command);
+        ext.manifest
+            .preferences
+            .iter()
+            .chain(command.into_iter().flat_map(|c| &c.preferences))
+            .find(|p| p.required && values.get(&p.name).is_none_or(|v| v.as_str() == Some("")))
+            .map(|p| p.title.clone())
     }
     pub fn load() -> Self {
         Self::load_at(&data_dir().join("state.json"))
@@ -129,5 +171,25 @@ mod order_tests {
         assert!(!store.is_enabled(&ext));
         store.enabled_builtins.insert(ext.manifest.id.clone());
         assert!(store.is_enabled(&ext));
+    }
+    #[test]
+    fn preferences_merge_defaults_and_overrides() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("index.mjs"), "").unwrap();
+        fs::write(temp.path().join("extension.json"), r#"{"id":"test.prefs","name":"P","version":"1","sdk_version":1,"entry":"index.mjs",
+            "preferences":[{"name":"units","type":"dropdown","title":"Units","data":[{"title":"Metric","value":"metric"},{"title":"Imperial","value":"imperial"}]},
+                           {"name":"key","type":"password","title":"API key","required":true}],
+            "commands":[{"id":"a","title":"A","preferences":[{"name":"fast","type":"checkbox","title":"Fast","default":true}]},{"id":"b","title":"B"}]}"#).unwrap();
+        let ext = crate::extensions::package::load(temp.path()).unwrap();
+        let mut store = Store::default();
+        let values = store.preference_values(&ext, "a");
+        assert_eq!(values["units"], "metric");
+        assert_eq!(values["fast"], true);
+        assert!(!store.preference_values(&ext, "b").contains_key("fast"));
+        assert_eq!(store.missing_preference(&ext, "a").as_deref(), Some("API key"));
+        store.preferences.entry("test.prefs".into()).or_default().insert("key".into(), "s3cret".into());
+        store.preferences.entry("test.prefs/a".into()).or_default().insert("fast".into(), false.into());
+        assert_eq!(store.missing_preference(&ext, "a"), None);
+        assert_eq!(store.preference_values(&ext, "a")["fast"], false);
     }
 }

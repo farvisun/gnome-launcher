@@ -7,6 +7,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {changedBindings, shouldRestore} from './shortcuts.js';
+import {Hud} from './hud.js';
 import {TimerTray} from './timers.js';
 
 const APP = 'io.github.gnomelauncher.Launcher';
@@ -67,6 +68,7 @@ export default class Lumen extends Extension {
         for (const window of global.display.list_all_windows()) this._hideFromDock(window);
         this._timers = new TimerTray(this._settings,
             target => this._activate('run-command', [new GLib.Variant('s', target)]));
+        this._hud = new Hud();
     }
     _animateIn(actor) {
         actor.remove_all_transitions();
@@ -200,6 +202,8 @@ export default class Lumen extends Extension {
     disable() {
         this._timers?.destroy();
         this._timers = null;
+        this._hud?.destroy();
+        this._hud = null;
         if (this._changed) this._settings.disconnect(this._changed);
         if (this._ownerWatch) Gio.bus_unwatch_name(this._ownerWatch);
         if (this._created) global.display.disconnect(this._created);

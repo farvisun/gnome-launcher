@@ -88,11 +88,12 @@ Log out and back in once. To remove a source install, run `python3 scripts/unins
 | **↑ / ↓** or **Ctrl + N / P** | Move the selection |
 | **Page Up / Page Down** | Jump five results |
 | **Enter** | Open, copy or run the selected result |
+| **Tab** | Move into a command's arguments, such as the angle for *Rotate Images* |
 | **Ctrl + K** | More actions: favourite, show in Files, copy path |
 | **Ctrl + ,** | Settings |
 | **Esc** | Clear the search, go back, then close |
 
-**Settings** (**Ctrl + ,**) lets you change the shortcut, choose whether applications always come first or results are sorted purely by best match, clear your usage history, check the file index, and manage extensions.
+**Settings** (**Ctrl + ,**) lets you change the shortcut, turn built-in extensions on and set their options (such as Weather's units and default place, or where Image Modification saves its results), choose whether applications always come first or results are sorted purely by best match, clear your usage history, check the file index, and manage extensions.
 
 Lumen finds files in the folders GNOME indexes. To add or remove folders, open **Settings → Files → Open Search Settings**. File contents are not searched.
 
@@ -102,7 +103,7 @@ Extensions are small programs that add commands to Lumen. To install one, open *
 
 Extensions run with your user's permissions, like any other app you install, so only install ones you trust. Lumen never runs a package's install scripts.
 
-To write your own, see the [extension guide](sdk/README.md) and the examples in `examples/`.
+To write your own, see the [extension guide](sdk/README.md) and the examples in `examples/`. Extensions can show lists, grids of images, detail panes and forms, open a view over another one, take arguments typed beside the search, offer settings, and run without a window, as Raycast extensions do.
 
 ## Privacy
 
@@ -118,6 +119,15 @@ Lumen uses GNOME's file index. Make sure the folder is included in **Settings �
 
 **How do I change the shortcut?**
 Open **Settings** (**Ctrl + ,**) and enter a new one, such as `<Super>space` or `<Control><Alt>space`.
+
+**Image Modification says ImageMagick is not installed.**
+Run `sudo apt install imagemagick`. For SVG output also install `potrace`; to strip EXIF data without re-encoding, `libimage-exiftool-perl`.
+
+**Image Modification asks me to choose images even though some are selected in Files.**
+It learns the selection through Files' Python plugins. Install them with `sudo apt install python3-nautilus`, then restart Files with `nautilus -q`. Or set **Image Input** to **Clipboard** in its settings and copy the images first.
+
+**How do I show the weather in the top bar?**
+Turn on Weather in **Settings → Extensions**, then switch on **Show weather in the top bar** below it.
 
 **How do I uninstall it?**
 Run `curl -fsSL https://farvisun.github.io/gnome-launcher/install.sh | bash -s -- --uninstall`. It turns Lumen off first, which restores your keyboard-layout shortcut, then removes the package.

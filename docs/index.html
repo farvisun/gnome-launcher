@@ -208,7 +208,7 @@ footer nav { position: static; background: none; border: 0; backdrop-filter: non
 
 <header class="hero" id="top">
   <div class="wrap">
-    <span class="pill"><b>v1.0.0</b> GNOME 50 · Wayland · Ubuntu 26.04</span>
+    <span class="pill"><b>v1.1.0</b> GNOME 50 · Wayland · Ubuntu 26.04</span>
     <h1>Everything on your desktop, <span>one keystroke away.</span></h1>
     <p class="lede">Lumen is a native command launcher for GNOME. Press <span class="combo"><kbd>Super</kbd> + <kbd>Space</kbd></span>, type a few letters, and open apps and files, do quick maths, start timers, check the weather, edit images, make passwords, or run extension commands.</p>
     <div class="cta">
@@ -275,7 +275,7 @@ footer nav { position: static; background: none; border: 0; backdrop-filter: non
       <div class="card">
         <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 14L20 4M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg></div>
         <h3>Extensions</h3>
-        <p>Timers, a speed test, a port manager, weather, image tools and a password generator come built in. Write your own commands in JavaScript or TypeScript, with lists, detail panes and forms drawn natively.</p>
+        <p>Timers, a speed test, a port manager, weather, image tools and a password generator come built in. Write your own commands in JavaScript or TypeScript, with lists, grids, detail panes and forms drawn natively.</p>
       </div>
       <div class="card">
         <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/></svg></div>
@@ -428,7 +428,7 @@ python3 scripts/install.py</pre></div>
     <div>
       <div class="eyebrow">Extensions</div>
       <h2>Add your own commands.</h2>
-      <p class="sub">Extensions are small Node.js programs. A manifest lists the commands; your code returns lists, detail pages or forms. Lists can have sections, coloured tags, progress bars, a details pane with charts, and live updates. Lumen draws them all with native widgets, and each extension runs in its own process.</p>
+      <p class="sub">Extensions are small Node.js programs. A manifest lists the commands; your code returns lists, image grids, detail pages or forms. Lists can have sections, coloured tags, progress bars, a details pane with charts, and live updates. Commands can take arguments typed beside the search, open views over each other, offer settings, and run without a window, as Raycast extensions do. Lumen draws them all with native widgets, and each extension runs in its own process.</p>
       <div class="code"><header><span>bash</span><button class="copy">Copy</button></header>
 <pre>node sdk/cli.mjs create ~/my-extension
 node sdk/cli.mjs build ~/my-extension ~/my-build

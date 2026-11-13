@@ -653,4 +653,19 @@ createInterface({input:process.stdin}).on('line',line=>{
         assert!(task.join().unwrap().is_err());
         assert!(started.elapsed() < Duration::from_secs(2));
     }
+    #[test]
+    fn bundled_port_manager_lists_ports_through_the_runtime() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/port-manager");
+        let ext = super::super::package::load(&path).unwrap();
+        let view = Runtime::default()
+            .request(
+                &ext,
+                "command.run",
+                json!({"command":"open-ports","query":""}),
+                Arc::new(AtomicBool::new(false)),
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(view["type"], "list");
+    }
 }

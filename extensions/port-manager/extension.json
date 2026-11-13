@@ -1,0 +1,13 @@
+{
+  "id": "lumen.port-manager",
+  "name": "Port Manager",
+  "version": "1.0.0",
+  "sdk_version": 1,
+  "entry": "index.mjs",
+  "description": "See which programs listen on network ports and stop them",
+  "capabilities": ["process", "filesystem", "clipboard", "open", "storage"],
+  "commands": [
+    {"id": "open-ports", "title": "Open Ports", "icon": "network-wired-symbolic", "keywords": ["port", "listening", "kill", "process", "localhost", "server"]},
+    {"id": "named-ports", "title": "Named Ports", "icon": "network-wired-symbolic", "keywords": ["port", "name", "label"]}
+  ]
+}

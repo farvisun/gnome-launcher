@@ -34,11 +34,42 @@ pub struct Command {
     pub subtitle: String,
     #[serde(default)]
     pub keywords: Vec<String>,
+    /// A GNOME icon name shown next to the command in search results.
+    #[serde(default)]
+    pub icon: String,
 }
 #[derive(Clone, Debug)]
 pub struct Extension {
     pub manifest: Manifest,
     pub directory: PathBuf,
+    /// Shipped with Lumen: off until the user turns it on, and never removed.
+    pub builtin: bool,
+}
+/// IDs with this prefix belong to extensions that ship with Lumen.
+pub const BUILTIN_PREFIX: &str = "lumen.";
+pub fn valid_icon(icon: &str) -> bool {
+    icon.len() <= 100
+        && icon
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+}
+/// Where the bundled extensions live. Installs keep them beside the binary
+/// (`<prefix>/bin` and `<prefix>/share/gnome-launcher/builtin`); debug builds
+/// fall back to the repository so `cargo run` finds them.
+pub fn builtin_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("LUMEN_BUILTIN_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    let installed = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent()?.parent().map(Path::to_path_buf))
+        .map(|prefix| prefix.join("share/gnome-launcher/builtin/extensions"))
+        .filter(|dir| dir.is_dir());
+    #[cfg(debug_assertions)]
+    let installed = installed.or_else(|| {
+        Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions")).filter(|d| d.is_dir())
+    });
+    installed
 }
 pub fn safe_relative(path: &Path) -> bool {
     !path.as_os_str().is_empty() && path.components().all(|c| matches!(c, Component::Normal(_)))
@@ -97,6 +128,7 @@ pub fn load(directory: &Path) -> Result<Extension> {
             !command.title.is_empty() && command.title.len() <= 160,
             "Invalid command title"
         );
+        ensure!(valid_icon(&command.icon), "Invalid command icon name");
     }
     for cap in &manifest.capabilities {
         ensure!(
@@ -116,12 +148,11 @@ pub fn load(directory: &Path) -> Result<Extension> {
     Ok(Extension {
         manifest,
         directory: root,
+        builtin: false,
     })
 }
-pub fn discover(store: &store::Store) -> Vec<Extension> {
-    let installed = store::data_dir().join("extensions");
-    recover_updates(&installed);
-    let mut roots: Vec<PathBuf> = fs::read_dir(&installed)
+fn subdirectories(root: &Path) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = fs::read_dir(root)
         .into_iter()
         .flatten()
         .filter_map(Result::ok)
@@ -131,13 +162,38 @@ pub fn discover(store: &store::Store) -> Vec<Extension> {
         })
         .map(|e| e.path())
         .collect();
+    dirs.sort();
+    dirs
+}
+pub fn discover(store: &store::Store) -> Vec<Extension> {
+    discover_in(builtin_dir().as_deref(), store)
+}
+/// Built-ins load first so an installed package can never shadow one.
+fn discover_in(builtin: Option<&Path>, store: &store::Store) -> Vec<Extension> {
+    let installed = store::data_dir().join("extensions");
+    recover_updates(&installed);
+    let builtins = builtin.map(subdirectories).unwrap_or_default();
+    let count = builtins.len();
+    let mut roots = builtins;
+    roots.extend(subdirectories(&installed));
     roots.extend(store.developers.iter().cloned());
     let mut seen = BTreeSet::new();
     roots
         .into_iter()
-        .filter_map(|p| match load(&p) {
-            Ok(ext) if seen.insert(ext.manifest.id.clone()) => Some(ext),
-            Ok(_) => None,
+        .enumerate()
+        .filter_map(|(index, p)| match load(&p) {
+            Ok(mut ext) if seen.insert(ext.manifest.id.clone()) => {
+                ext.builtin = index < count;
+                Some(ext)
+            }
+            Ok(ext) => {
+                eprintln!(
+                    "Ignoring extension {}: {} is already loaded",
+                    p.display(),
+                    ext.manifest.id
+                );
+                None
+            }
             Err(e) => {
                 eprintln!("Ignoring extension {}: {e:#}", p.display());
                 None
@@ -240,6 +296,10 @@ pub fn unpack(package: &Path, target: &Path) -> Result<Extension> {
 }
 pub fn install(staged: &Path, extensions: &Path, replace: bool) -> Result<()> {
     let extension = load(staged)?;
+    ensure!(
+        !extension.manifest.id.starts_with(BUILTIN_PREFIX),
+        "The {BUILTIN_PREFIX} ID prefix is reserved for built-in extensions"
+    );
     fs::create_dir_all(extensions)?;
     let target = extensions.join(&extension.manifest.id);
     let backup = extensions.join(format!(".{}.backup", extension.manifest.id));
@@ -353,6 +413,30 @@ mod tests {
         fixture(&root.join(".test.example.backup"));
         recover_updates(root);
         assert!(!root.join(".test.example.backup").exists());
+    }
+    #[test]
+    fn builtins_win_over_developer_folders_with_the_same_id() {
+        let temp = tempfile::tempdir().unwrap();
+        fixture(&temp.path().join("builtin/example"));
+        fixture(&temp.path().join("developer"));
+        let mut store = store::Store::default();
+        store.developers.insert(temp.path().join("developer"));
+        let found = discover_in(Some(&temp.path().join("builtin")), &store);
+        let ext = found.iter().find(|e| e.manifest.id == "test.example").unwrap();
+        assert!(ext.builtin);
+        assert_eq!(found.iter().filter(|e| e.manifest.id == "test.example").count(), 1);
+    }
+    #[test]
+    fn rejects_reserved_ids_and_bad_icons() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("stage");
+        fixture(&root);
+        let manifest = fs::read_to_string(root.join("extension.json")).unwrap();
+        fs::write(root.join("extension.json"), manifest.replace("test.example", "lumen.fake")).unwrap();
+        assert!(install(&root, &temp.path().join("installed"), false).is_err());
+        let manifest = fs::read_to_string(root.join("extension.json")).unwrap();
+        fs::write(root.join("extension.json"), manifest.replace(r#""title":"Hello""#, r#""title":"Hello","icon":"../x""#)).unwrap();
+        assert!(load(&root).is_err());
     }
     #[test]
     fn rejects_traversal_links_and_bad_versions() {

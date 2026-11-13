@@ -50,6 +50,15 @@ fn shortcut_settings() -> Option<gio::Settings> {
         None,
     ))
 }
+fn builtin_subtitle(ext: &Extension) -> String {
+    let commands: Vec<&str> = ext
+        .manifest
+        .commands
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    format!("{}\nCommands: {}", ext.manifest.description, commands.join(", "))
+}
 impl Ui {
     pub(super) fn open_settings(self: &Rc<Self>) {
         if let Some(window) = self
@@ -239,6 +248,7 @@ impl Ui {
             .title("Extensions")
             .icon_name("application-x-addon-symbolic")
             .build();
+        extensions_page.add(&self.builtin_group());
         let install = adw::PreferencesGroup::builder().title("Install an extension").description("Choose a .lumen-extension package or paste its HTTPS URL. Review its source and capabilities before enabling it.").build();
         let source = adw::EntryRow::builder()
             .title("Package path or HTTPS URL")
@@ -337,7 +347,7 @@ impl Ui {
         let installed = adw::PreferencesGroup::builder()
             .title("Installed extensions")
             .build();
-        if self.extensions.borrow().is_empty() {
+        if self.extensions.borrow().iter().all(|e| e.builtin) {
             installed.add(
                 &adw::ActionRow::builder()
                     .use_markup(false)
@@ -346,7 +356,7 @@ impl Ui {
                     .build(),
             );
         }
-        for ext in self.extensions.borrow().iter() {
+        for ext in self.extensions.borrow().iter().filter(|e| !e.builtin) {
             let row = adw::ActionRow::builder()
                 .use_markup(false)
                 .title(&ext.manifest.name)
@@ -442,6 +452,96 @@ impl Ui {
         window.add(&extensions_page);
         *self.settings_window.borrow_mut() = Some(window.clone());
         window.present();
+    }
+    /// Extensions that ship with Lumen. They start off; turning one on
+    /// only adds its commands to the palette.
+    fn builtin_group(self: &Rc<Self>) -> adw::PreferencesGroup {
+        let group = adw::PreferencesGroup::builder()
+            .title("Built-in extensions")
+            .description("Extra commands that come with Lumen. Turn on the ones you want.")
+            .build();
+        let builtins: Vec<Extension> = self
+            .extensions
+            .borrow()
+            .iter()
+            .filter(|e| e.builtin)
+            .cloned()
+            .collect();
+        if builtins.is_empty() {
+            group.add(
+                &adw::ActionRow::builder()
+                    .use_markup(false)
+                    .title("Built-in extensions are missing")
+                    .subtitle("Reinstall Lumen to restore them.")
+                    .build(),
+            );
+        }
+        for ext in builtins {
+            let enabled = self.state.borrow().is_enabled(&ext);
+            let subtitle = builtin_subtitle(&ext);
+            let id = ext.manifest.id.clone();
+            let weak = Rc::downgrade(self);
+            let set = move |active: bool| {
+                let Some(ui) = weak.upgrade() else { return };
+                {
+                    let mut state = ui.state.borrow_mut();
+                    if active == state.enabled_builtins.contains(&id) {
+                        return;
+                    }
+                    if active {
+                        state.enabled_builtins.insert(id.clone());
+                    } else {
+                        state.enabled_builtins.remove(&id);
+                    }
+                }
+                ui.cancel();
+                ui.runtime.stop(&id);
+                ui.persist();
+                ui.refresh_extensions();
+            };
+            if ext.manifest.id == "lumen.timers" {
+                let row = adw::ExpanderRow::builder()
+                    .use_markup(false)
+                    .title(&ext.manifest.name)
+                    .subtitle(&subtitle)
+                    .show_enable_switch(true)
+                    .enable_expansion(enabled)
+                    .build();
+                row.connect_enable_expansion_notify(move |row| set(row.enables_expansion()));
+                let indicator = adw::SwitchRow::builder()
+                    .title("Show countdown in the top bar")
+                    .subtitle("Shows the next timer to finish while timers are running.")
+                    .build();
+                match shortcut_settings()
+                    .filter(|s| s.settings_schema().is_some_and(|k| k.has_key("show-timer-indicator")))
+                {
+                    Some(settings) => {
+                        // The binding holds its own reference to the settings object.
+                        settings
+                            .bind("show-timer-indicator", &indicator, "active")
+                            .build();
+                    }
+                    None => {
+                        indicator.set_sensitive(false);
+                        indicator.set_subtitle(
+                            "Install the GNOME Shell integration to show timers in the top bar.",
+                        );
+                    }
+                }
+                row.add_row(&indicator);
+                group.add(&row);
+            } else {
+                let row = adw::SwitchRow::builder()
+                    .use_markup(false)
+                    .title(&ext.manifest.name)
+                    .subtitle(&subtitle)
+                    .active(enabled)
+                    .build();
+                row.connect_active_notify(move |row| set(row.is_active()));
+                group.add(&row);
+            }
+        }
+        group
     }
     fn review_package(
         self: &Rc<Self>,

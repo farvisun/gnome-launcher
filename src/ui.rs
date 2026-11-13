@@ -123,6 +123,23 @@ pub fn run(args: &[String]) {
             });
             app.add_action(&action);
         }
+        // "<extension-id>/<command-id>": the top-bar timer menu opens a command directly.
+        let action = gio::SimpleAction::new("run-command", Some(glib::VariantTy::STRING));
+        let weak = Rc::downgrade(&ui);
+        action.connect_activate(move |_, parameter| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some((extension, command)) = parameter
+                .and_then(|p| p.str())
+                .and_then(|p| p.split_once('/'))
+            else {
+                return;
+            };
+            ui.show();
+            if let Err(e) = ui.open_command(extension, command) {
+                ui.status.set_label(&format!("{e:#}"));
+            }
+        });
+        app.add_action(&action);
     });
     let holder = ui.clone();
     app.connect_command_line(move |_, command| {
@@ -646,7 +663,7 @@ impl Ui {
             .extensions
             .borrow()
             .iter()
-            .filter(|e| !state.disabled.contains(&e.manifest.id))
+            .filter(|e| state.is_enabled(e))
         {
             for cmd in &ext.manifest.commands {
                 candidates.push(Candidate::new(Item {
@@ -657,7 +674,11 @@ impl Ui {
                     } else {
                         cmd.subtitle.clone()
                     },
-                    icon: "application-x-addon-symbolic".into(),
+                    icon: if cmd.icon.is_empty() {
+                        "application-x-addon-symbolic".into()
+                    } else {
+                        cmd.icon.clone()
+                    },
                     keywords: cmd.keywords.join(" "),
                     kind: Kind::Command {
                         extension: ext.manifest.id.clone(),
@@ -1033,36 +1054,7 @@ impl Ui {
                         .set_label(&format!("Copied {value} to the clipboard"));
                 }
                 Kind::Settings => self.open_settings(),
-                Kind::Command { extension, command } => {
-                    let ext = self
-                        .extensions
-                        .borrow()
-                        .iter()
-                        .find(|e| &e.manifest.id == extension)
-                        .cloned()
-                        .ok_or_else(|| anyhow::anyhow!("Extension is no longer installed"))?;
-                    self.cancel();
-                    self.suppress_search.set(true);
-                    self.entry.set_text("");
-                    self.suppress_search.set(false);
-                    *self.active.borrow_mut() = Some((ext, command.clone()));
-                    self.entry
-                        .set_placeholder_text(Some(&format!("Search {}…", item.title)));
-                    self.scope.set_child(Some(&{
-                        let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-                        content.append(&gtk::Image::from_icon_name("go-previous-symbolic"));
-                        content.append(
-                            &gtk::Label::builder()
-                                .label(&item.title)
-                                .ellipsize(gtk::pango::EllipsizeMode::End)
-                                .max_width_chars(22)
-                                .build(),
-                        );
-                        content
-                    }));
-                    self.scope.set_visible(true);
-                    self.extension_request("command.run", json!({"query":""}));
-                }
+                Kind::Command { extension, command } => self.open_command(extension, command)?,
             }
             self.state.borrow_mut().used(&item.id);
             self.persist();
@@ -1071,6 +1063,45 @@ impl Ui {
         if let Err(e) = result {
             self.status.set_label(&format!("{e:#}"));
         }
+    }
+    /// Enters an extension command, as if its result had been chosen.
+    fn open_command(self: &Rc<Self>, extension: &str, command: &str) -> anyhow::Result<()> {
+        let ext = self
+            .extensions
+            .borrow()
+            .iter()
+            .find(|e| e.manifest.id == extension && self.state.borrow().is_enabled(e))
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Extension is not installed or turned off"))?;
+        let title = ext
+            .manifest
+            .commands
+            .iter()
+            .find(|c| c.id == command)
+            .map(|c| c.title.clone())
+            .ok_or_else(|| anyhow::anyhow!("Extension has no command {command}"))?;
+        self.cancel();
+        self.suppress_search.set(true);
+        self.entry.set_text("");
+        self.suppress_search.set(false);
+        *self.active.borrow_mut() = Some((ext, command.to_owned()));
+        self.entry
+            .set_placeholder_text(Some(&format!("Search {title}…")));
+        self.scope.set_child(Some(&{
+            let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            content.append(&gtk::Image::from_icon_name("go-previous-symbolic"));
+            content.append(
+                &gtk::Label::builder()
+                    .label(&title)
+                    .ellipsize(gtk::pango::EllipsizeMode::End)
+                    .max_width_chars(22)
+                    .build(),
+            );
+            content
+        }));
+        self.scope.set_visible(true);
+        self.extension_request("command.run", json!({"query":""}));
+        Ok(())
     }
     fn open_uri(&self, uri: &str) -> anyhow::Result<()> {
         gio::AppInfo::launch_default_for_uri(

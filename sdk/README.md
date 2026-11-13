@@ -36,7 +36,9 @@ Choose the package in Lumen's extension settings. To skip bundling during develo
 }
 ```
 
-IDs contain lowercase ASCII letters, digits, dots, and hyphens. SDK version is the integer `1`. Commands have unique IDs. Entry points must resolve inside the project. Up to 50 commands are accepted. Packages permit regular files and directories only: no links, traversal paths, devices, or installation scripts. Limits: 20 MiB compressed, 50 MiB unpacked, 2,000 entries.
+Commands may set `"icon"` to a GNOME icon name (for example `"alarm-symbolic"`) to replace the default extension icon in search results.
+
+IDs contain lowercase ASCII letters, digits, dots, and hyphens. The `lumen.` prefix is reserved for the extensions that ship with Lumen. SDK version is the integer `1`. Commands have unique IDs. Entry points must resolve inside the project. Up to 50 commands are accepted. Packages permit regular files and directories only: no links, traversal paths, devices, or installation scripts. Limits: 20 MiB compressed, 50 MiB unpacked, 2,000 entries.
 
 Capability names are `clipboard`, `open`, `notifications`, `storage`, `network`, `filesystem`, and `process`. The first four are checked by host methods. The last three document an extension's direct Node access. These declarations **do not sandbox a program**.
 

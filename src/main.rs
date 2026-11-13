@@ -64,7 +64,22 @@ fn run() -> Result<()> {
             println!("Lumen {}", env!("CARGO_PKG_VERSION"));
             println!("{} applications", apps::installed().len());
             println!("{}", files::status().unwrap_or_else(|e| e.to_string()));
-            for binary in ["node", "gnome-extensions", "gsettings"] {
+            println!(
+                "built-in extensions: {}",
+                extensions::package::builtin_dir()
+                    .map(|d| d.display().to_string())
+                    .unwrap_or_else(|| "missing".into())
+            );
+            // systemd-run and notify-send ring timers; pkexec and fuser stop other users' ports.
+            for binary in [
+                "node",
+                "gnome-extensions",
+                "gsettings",
+                "systemd-run",
+                "notify-send",
+                "pkexec",
+                "fuser",
+            ] {
                 println!(
                     "{binary}: {}",
                     gio::Subprocess::newv(

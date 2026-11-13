@@ -33,8 +33,18 @@ pub struct Store {
     pub disabled: BTreeSet<String>,
     pub developers: BTreeSet<PathBuf>,
     pub result_order: ResultOrder,
+    /// Built-in extensions are opt-in, so they are tracked separately from
+    /// `disabled`, which lists the installed extensions a user turned off.
+    pub enabled_builtins: BTreeSet<String>,
 }
 impl Store {
+    pub fn is_enabled(&self, ext: &crate::extensions::package::Extension) -> bool {
+        if ext.builtin {
+            self.enabled_builtins.contains(&ext.manifest.id)
+        } else {
+            !self.disabled.contains(&ext.manifest.id)
+        }
+    }
     pub fn load() -> Self {
         Self::load_at(&data_dir().join("state.json"))
     }
@@ -104,5 +114,20 @@ mod order_tests {
         assert!(text.contains(r#""result_order":"relevance""#));
         let back: Store = serde_json::from_str(&text).unwrap();
         assert_eq!(back.result_order, ResultOrder::Relevance);
+    }
+    #[test]
+    fn builtins_are_opt_in_and_installed_extensions_opt_out() {
+        let old: Store = serde_json::from_str(r#"{"disabled":["other"]}"#).unwrap();
+        assert!(old.enabled_builtins.is_empty());
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/quick-links");
+        let mut ext = crate::extensions::package::load(&path).unwrap();
+        let mut store = Store::default();
+        assert!(store.is_enabled(&ext));
+        store.disabled.insert(ext.manifest.id.clone());
+        assert!(!store.is_enabled(&ext));
+        ext.builtin = true;
+        assert!(!store.is_enabled(&ext));
+        store.enabled_builtins.insert(ext.manifest.id.clone());
+        assert!(store.is_enabled(&ext));
     }
 }

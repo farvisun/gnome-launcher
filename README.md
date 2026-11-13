@@ -29,7 +29,11 @@ Press **Super + Space**, type a few letters and press **Enter**. Lumen opens app
 - **Files and folders.** Search names and paths through GNOME's own file index, so there is no second indexer slowing your computer. Open a file, show it in Files or copy its path.
 - **Calculator.** Type `sqrt(144) * 3`, `200 * 15%` or `2^8` and see the answer as you type. Enter copies it.
 - **Favourites.** Pin what you use most with **Ctrl + K**.
-- **Built-in extensions.** Turn on Timers (countdowns that ring even when Lumen is closed, stopwatches, and a top-bar countdown), Speedtest (download, upload and ping through speed.cloudflare.com) and Port Manager (see and stop the programs listening on ports) in **Settings → Extensions**. All three are off until you turn them on.
+- **Built-in extensions.** Turn them on in **Settings → Extensions**; each one is off until you do.
+  - **Timers:** countdowns that ring even when Lumen is closed, stopwatches, and a top-bar countdown.
+  - **Speedtest:** download, upload and ping through speed.cloudflare.com.
+  - **Port Manager:** see and stop the programs listening on ports.
+  - **Password Generator:** random passwords of 5–64 characters, or memorable ones such as `{word:capitalize}-{number:4}{symbol}`. *Copy Random Password* puts one on the clipboard without opening anything.
 - **Extensions.** Add your own commands, written in JavaScript or TypeScript.
 - **Private.** Your searches are never saved or sent anywhere. No account, no telemetry.
 

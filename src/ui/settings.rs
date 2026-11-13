@@ -540,7 +540,7 @@ impl Ui {
                         let row = adw::SwitchRow::builder()
                             .use_markup(false)
                             .title(if pref.label.is_empty() { &title } else { &pref.label })
-                            .subtitle(if pref.label.is_empty() { &pref.description } else { &title })
+                            .subtitle(&pref.description)
                             .active(current.as_bool().unwrap_or(false))
                             .build();
                         row.connect_active_notify(move |row| save(json!(row.is_active())));

@@ -1,0 +1,32 @@
+{
+  "id": "lumen.password-generator",
+  "name": "Password Generator",
+  "version": "1.0.0",
+  "sdk_version": 1,
+  "entry": "index.mjs",
+  "description": "Generate passwords of 5–64 characters, or memorable ones from words, numbers and symbols",
+  "capabilities": ["clipboard", "storage"],
+  "preferences": [
+    {"name": "hideAfterCopy", "type": "checkbox", "title": "Options", "label": "Hide Lumen after copy", "description": "Close Lumen after the password is copied to the clipboard.", "default": false}
+  ],
+  "commands": [
+    {"id": "generate-random-password", "title": "Generate Random Password", "subtitle": "Password Generator", "icon": "dialog-password-symbolic",
+     "keywords": ["password", "generate", "random", "secure", "secret"],
+     "preferences": [
+       {"name": "storePasswordLength", "type": "checkbox", "title": "Remember password length", "label": "Remember password length", "description": "Remember the last password length between runs.", "default": true},
+       {"name": "rememberNumbersAndCharacters", "type": "checkbox", "title": "Remember numbers and characters", "label": "Remember numbers and characters", "description": "Remember to use numbers and characters between runs.", "default": false}
+     ]},
+    {"id": "copy-random-password", "title": "Copy Random Password", "subtitle": "Password Generator", "icon": "edit-copy-symbolic", "mode": "no-view",
+     "keywords": ["password", "generate", "random", "copy", "clipboard"],
+     "preferences": [
+       {"name": "length", "type": "textfield", "title": "Number of characters", "description": "The number of characters in the generated password (5–64).", "default": "16"},
+       {"name": "useNumbers", "type": "checkbox", "title": "Options", "label": "Use numbers", "description": "Include numbers in the generated password.", "default": true},
+       {"name": "useChars", "type": "checkbox", "title": "Options", "label": "Use special characters", "description": "Include special characters in the generated password.", "default": true}
+     ]},
+    {"id": "generate-memorable-password", "title": "Generate Memorable Password", "subtitle": "Password Generator", "icon": "dialog-password-symbolic",
+     "keywords": ["password", "generate", "memorable", "words", "passphrase"],
+     "preferences": [
+       {"name": "rememberCustomFormat", "type": "checkbox", "title": "Remember custom format", "label": "Remember custom format", "description": "Remember the last custom format between runs.", "default": true}
+     ]}
+  ]
+}

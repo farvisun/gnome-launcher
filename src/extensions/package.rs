@@ -616,7 +616,12 @@ mod tests {
     fn bundled_extensions_load() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions");
         let found = discover_in(Some(&root), &store::Store::default());
-        for id in ["lumen.timers", "lumen.speedtest", "lumen.port-manager"] {
+        for id in [
+            "lumen.timers",
+            "lumen.speedtest",
+            "lumen.port-manager",
+            "lumen.password-generator",
+        ] {
             assert!(found.iter().any(|e| e.manifest.id == id && e.builtin), "{id}");
         }
     }

@@ -289,7 +289,17 @@ pub fn validate_view(view: &Value) -> Result<()> {
                     item["title"].as_str().is_some_and(|s| s.len() <= 1000),
                     "Invalid item title"
                 );
+                validate_decoration(item)?;
             }
+            if let Some(refresh) = view.get("refresh") {
+                ensure!(
+                    refresh.as_u64().is_some_and(|ms| (500..=60_000).contains(&ms)),
+                    "List refresh must be 500–60000 ms"
+                );
+            }
+            optional_text(&view["placeholder"], 200, "placeholder")?;
+            optional_text(&view["empty"]["title"], 200, "empty view title")?;
+            optional_text(&view["empty"]["description"], 1000, "empty view description")?;
         }
         Some("detail") => {
             ensure!(
@@ -317,6 +327,76 @@ pub fn validate_view(view: &Value) -> Result<()> {
             }
         }
         _ => bail!("Expected a list, detail, form, or null view"),
+    }
+    Ok(())
+}
+fn optional_text(value: &Value, limit: usize, what: &str) -> Result<()> {
+    ensure!(
+        value.is_null() || value.as_str().is_some_and(|s| s.len() <= limit),
+        "Invalid {what}"
+    );
+    Ok(())
+}
+fn optional_color(value: &Value) -> Result<()> {
+    ensure!(
+        value.is_null()
+            || value
+                .as_str()
+                .is_some_and(|c| crate::ui::COLORS.contains(&c)),
+        "Unknown colour; use {}",
+        crate::ui::COLORS.join(", ")
+    );
+    Ok(())
+}
+/// Sections, tints, accessories, progress and the side-pane detail of one list item.
+fn validate_decoration(item: &Value) -> Result<()> {
+    optional_text(&item["section"], 100, "section")?;
+    optional_color(&item["tint"])?;
+    ensure!(
+        item["progress"].is_null()
+            || item["progress"].as_f64().is_some_and(|p| (0. ..=1.).contains(&p)),
+        "Progress must be between 0 and 1"
+    );
+    if !item["accessories"].is_null() {
+        let accessories = item["accessories"].as_array().context("Accessories must be a list")?;
+        ensure!(accessories.len() <= 6, "At most 6 accessories per item");
+        for accessory in accessories {
+            optional_text(&accessory["text"], 100, "accessory text")?;
+            optional_text(&accessory["tag"], 60, "accessory tag")?;
+            optional_text(&accessory["tooltip"], 300, "accessory tooltip")?;
+            optional_color(&accessory["color"])?;
+        }
+    }
+    let detail = &item["detail"];
+    if detail.is_null() {
+        return Ok(());
+    }
+    ensure!(detail.is_object(), "Item detail must be an object");
+    optional_text(&detail["text"], 20_000, "detail text")?;
+    optional_text(&detail["hero"]["value"], 40, "hero value")?;
+    optional_text(&detail["hero"]["unit"], 20, "hero unit")?;
+    optional_text(&detail["hero"]["caption"], 200, "hero caption")?;
+    optional_color(&detail["hero"]["color"])?;
+    optional_color(&detail["chart"]["color"])?;
+    if let Some(values) = detail["chart"]["values"].as_array() {
+        ensure!(
+            values.len() <= 200 && values.iter().all(|v| v.as_f64().is_some_and(f64::is_finite)),
+            "Chart needs up to 200 finite numbers"
+        );
+    }
+    if !detail["metadata"].is_null() {
+        let rows = detail["metadata"].as_array().context("Metadata must be a list")?;
+        ensure!(rows.len() <= 40, "At most 40 metadata rows");
+        for row in rows {
+            optional_text(&row["label"], 100, "metadata label")?;
+            optional_text(&row["text"], 2000, "metadata text")?;
+            optional_color(&row["color"])?;
+            for tag in row["tags"].as_array().into_iter().flatten().take(21) {
+                optional_text(&tag["text"], 60, "metadata tag")?;
+                optional_color(&tag["color"])?;
+            }
+            ensure!(row["tags"].as_array().is_none_or(|t| t.len() <= 20), "At most 20 tags per row");
+        }
     }
     Ok(())
 }
@@ -381,6 +461,19 @@ mod tests {
             .is_err()
         );
         assert!(validate_view(&json!({"type":"webview","url":"..."})).is_err());
+        let rich = json!({"type":"list","refresh":1000,"items":[{"id":"a","title":"A","section":"Running","tint":"green","progress":0.5,
+            "accessories":[{"text":"5 min"},{"tag":"Running","color":"yellow"}],
+            "detail":{"hero":{"value":"12","unit":"Mbps","color":"blue"},"chart":{"values":[1,2,3]},"metadata":[{"label":"PID","text":"1"},{"separator":true},{"label":"Ports","tags":[{"text":"80","color":"orange"}]}]}}]});
+        assert!(validate_view(&rich).is_ok());
+        let mut bad = rich.clone();
+        bad["items"][0]["tint"] = json!("pink");
+        assert!(validate_view(&bad).is_err());
+        let mut bad = rich.clone();
+        bad["items"][0]["progress"] = json!(2);
+        assert!(validate_view(&bad).is_err());
+        let mut bad = rich;
+        bad["refresh"] = json!(10);
+        assert!(validate_view(&bad).is_err());
     }
     #[test]
     fn runs_sample_and_survives_a_crash() {

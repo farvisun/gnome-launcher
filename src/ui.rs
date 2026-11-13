@@ -1,4 +1,6 @@
+mod rich;
 mod settings;
+pub use rich::COLORS;
 
 use crate::{
     apps, calculator,
@@ -53,6 +55,9 @@ pub struct Ui {
     entry: gtk::SearchEntry,
     list: gtk::ListBox,
     scroll: gtk::ScrolledWindow,
+    /// Side pane for an extension list's `detail`, beside the results.
+    side: gtk::Box,
+    side_scroll: gtk::ScrolledWindow,
     stack: gtk::Stack,
     detail: gtk::Box,
     scope: gtk::Button,
@@ -72,8 +77,11 @@ pub struct Ui {
     pub(super) extensions: RefCell<Vec<Extension>>,
     pub(super) runtime: Arc<Runtime>,
     results: RefCell<Vec<Item>>,
-    /// What the visible rows were built from, so identical updates skip a rebuild.
-    rendered: RefCell<(Vec<&'static str>, Vec<bool>)>,
+    /// What the visible rows were built from, so identical updates skip a rebuild:
+    /// sections, favourites, and each extension row's raw JSON (null elsewhere).
+    rendered: RefCell<(Vec<String>, Vec<bool>, Vec<Value>)>,
+    /// Pending timed refresh of an extension list that asked for one.
+    refresh: RefCell<Option<glib::SourceId>>,
     file_results: RefCell<Vec<Candidate>>,
     generation: Cell<u64>,
     file_cancel: RefCell<Option<gio::Cancellable>>,
@@ -232,9 +240,21 @@ impl Ui {
             .vexpand(true)
             .child(&detail)
             .build();
+        let side = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        side.add_css_class("side-pane");
+        let side_scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .width_request(280)
+            .visible(false)
+            .child(&side)
+            .build();
+        let results_area = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        scroll.set_hexpand(true);
+        results_area.append(&scroll);
+        results_area.append(&side_scroll);
         let stack = gtk::Stack::new();
         stack.set_vexpand(true);
-        stack.add_named(&scroll, Some("results"));
+        stack.add_named(&results_area, Some("results"));
         stack.add_named(&detail_scroll, Some("detail"));
         root.append(&stack);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 14);
@@ -276,6 +296,8 @@ impl Ui {
             entry,
             list,
             scroll,
+            side,
+            side_scroll,
             stack,
             detail,
             scope,
@@ -292,6 +314,7 @@ impl Ui {
             runtime: Arc::default(),
             results: RefCell::default(),
             rendered: RefCell::default(),
+            refresh: RefCell::default(),
             file_results: RefCell::default(),
             generation: Cell::new(0),
             file_cancel: RefCell::default(),
@@ -353,6 +376,7 @@ impl Ui {
         ui.list.connect_row_selected(move |_, _| {
             if let Some(ui) = weak.upgrade() {
                 ui.update_hints();
+                ui.update_side();
             }
         });
         let key = gtk::EventControllerKey::new();
@@ -488,6 +512,9 @@ impl Ui {
         if let Some(source) = self.debounce.borrow_mut().take() {
             source.remove();
         }
+        if let Some(source) = self.refresh.borrow_mut().take() {
+            source.remove();
+        }
         self.generation.set(self.generation.get().wrapping_add(1));
     }
     /// Fade out briefly, then unmap. The Shell side animates opening on the
@@ -523,6 +550,7 @@ impl Ui {
         *self.view.borrow_mut() = Value::Null;
         self.form.borrow_mut().clear();
         self.stack.set_visible_child_name("results");
+        self.side_scroll.set_visible(false);
         self.scope.set_visible(false);
         self.entry.set_placeholder_text(Some(PLACEHOLDER));
         self.suppress_search.set(true);
@@ -760,9 +788,14 @@ impl Ui {
             None if count == 1 => "1 result".into(),
             None => format!("{count} results"),
         });
-        self.set_items(items, sections);
+        let count = items.len();
+        self.set_items(
+            items,
+            sections.into_iter().map(String::from).collect(),
+            vec![Value::Null; count],
+        );
     }
-    fn set_items(self: &Rc<Self>, items: Vec<Item>, sections: Vec<&'static str>) {
+    fn set_items(self: &Rc<Self>, items: Vec<Item>, sections: Vec<String>, decor: Vec<Value>) {
         let favorites: Vec<bool> = {
             let state = self.state.borrow();
             items
@@ -775,11 +808,29 @@ impl Ui {
         if *self.results.borrow() == items
             && {
                 let rendered = self.rendered.borrow();
-                rendered.0 == sections && rendered.1 == favorites
+                rendered.0 == sections && rendered.1 == favorites && rendered.2 == decor
             }
             && (!items.is_empty() || self.list.row_at_index(0).is_some())
         {
             self.update_hints();
+            return;
+        }
+        // A refreshed list with the same rows only swaps row contents, so the
+        // selection, hover and scroll position stay where the user left them.
+        let same_rows = !items.is_empty()
+            && self.rendered.borrow().0 == sections
+            && self.results.borrow().len() == items.len()
+            && self.results.borrow().iter().zip(&items).all(|(a, b)| a.id == b.id);
+        if same_rows {
+            for (index, item) in items.iter().enumerate() {
+                if let Some(row) = self.list.row_at_index(index as i32) {
+                    row.set_child(Some(&result_row(item, favorites[index], &decor[index])));
+                }
+            }
+            *self.results.borrow_mut() = items;
+            *self.rendered.borrow_mut() = (sections, favorites, decor);
+            self.update_hints();
+            self.update_side();
             return;
         }
         let selected = self.list.selected_row().and_then(|r| {
@@ -795,12 +846,12 @@ impl Ui {
             if let Some(name) = sections.get(index) {
                 row.set_widget_name(&format!("section:{name}"));
             }
-            row.set_child(Some(&result_row(item, favorites[index])));
+            row.set_child(Some(&result_row(item, favorites[index], &decor[index])));
             self.list.append(&row);
         }
         let empty = items.is_empty();
         *self.results.borrow_mut() = items;
-        *self.rendered.borrow_mut() = (sections, favorites);
+        *self.rendered.borrow_mut() = (sections, favorites, decor);
         if empty {
             let row = gtk::ListBoxRow::new();
             row.set_selectable(false);
@@ -827,11 +878,50 @@ impl Ui {
             }
         }
         self.update_hints();
+        self.update_side();
+    }
+    /// Shows the selected extension row's `detail` in the side pane.
+    fn update_side(&self) {
+        if !self.side_scroll.is_visible() {
+            return;
+        }
+        let index = self.list.selected_row().map(|r| r.index() as usize);
+        let rendered = self.rendered.borrow();
+        match index.and_then(|i| rendered.2.get(i)) {
+            Some(item) if !item.is_null() => rich::fill_detail(&self.side, item),
+            _ => rich::fill_detail(&self.side, &Value::Null),
+        }
     }
     fn empty_state(&self) -> gtk::Box {
         let query = self.entry.text();
         let empty = gtk::Box::new(gtk::Orientation::Vertical, 6);
         empty.add_css_class("empty-state");
+        let custom = self.view.borrow()["empty"].clone();
+        if self.active.borrow().is_some() && custom["title"].is_string() {
+            let icon = gtk::Image::from_icon_name(
+                custom["icon"].as_str().unwrap_or("system-search-symbolic"),
+            );
+            icon.set_pixel_size(48);
+            icon.add_css_class("empty-icon");
+            empty.append(&icon);
+            let title = gtk::Label::builder()
+                .label(custom["title"].as_str().unwrap_or(""))
+                .wrap(true)
+                .justify(gtk::Justification::Center)
+                .build();
+            title.add_css_class("empty-title");
+            empty.append(&title);
+            if let Some(text) = custom["description"].as_str() {
+                let hint = gtk::Label::builder()
+                    .label(text)
+                    .wrap(true)
+                    .justify(gtk::Justification::Center)
+                    .build();
+                hint.add_css_class("empty-hint");
+                empty.append(&hint);
+            }
+            return empty;
+        }
         let icon = gtk::Image::from_icon_name("system-search-symbolic");
         icon.set_pixel_size(48);
         icon.add_css_class("empty-icon");
@@ -859,19 +949,23 @@ impl Ui {
     /// Updates the footer to describe what Enter will do for the selection.
     fn update_hints(&self) {
         let verb = self.list.selected_row().and_then(|r| {
-            self.results.borrow().get(r.index() as usize).map(|item| {
+            let index = r.index() as usize;
+            self.results.borrow().get(index).map(|item| {
                 match (&item.kind, self.active.borrow().is_some()) {
-                    (_, true) => "Select",
-                    (Kind::Calculation(_), _) => "Copy",
-                    (Kind::Command { .. }, _) => "Run",
-                    _ => "Open",
+                    // An extension names its Enter action as the row's first action.
+                    (_, true) => self.rendered.borrow().2.get(index)
+                        .and_then(|i| i["actions"][0]["title"].as_str().map(str::to_owned))
+                        .unwrap_or_else(|| "Select".into()),
+                    (Kind::Calculation(_), _) => "Copy".into(),
+                    (Kind::Command { .. }, _) => "Run".into(),
+                    _ => "Open".into(),
                 }
             })
         });
         let results = self.stack.visible_child_name().as_deref() == Some("results");
         self.primary_hint.set_visible(verb.is_some() && results);
         if let Some(verb) = verb {
-            self.primary_label.set_label(verb);
+            self.primary_label.set_label(&verb);
         }
     }
     fn move_selection(&self, delta: i32) {
@@ -1108,7 +1202,11 @@ impl Ui {
         popover.set_child(Some(&content));
         popover
     }
-    fn extension_request(self: &Rc<Self>, method: &str, mut params: Value) {
+    fn extension_request(self: &Rc<Self>, method: &str, params: Value) {
+        self.extension_request_with(method, params, false);
+    }
+    /// `quiet` requests are timed refreshes: no "Running command…" status.
+    fn extension_request_with(self: &Rc<Self>, method: &str, mut params: Value, quiet: bool) {
         let Some((ext, command)) = self.active.borrow().clone() else {
             return;
         };
@@ -1123,7 +1221,9 @@ impl Ui {
         // The worker wakes the main loop only when it has an event, instead of
         // the UI polling a channel every 12 ms until the command finishes.
         let (tx, mut rx) = futures_channel::mpsc::unbounded();
-        self.status.set_label("Running command…");
+        if !quiet {
+            self.status.set_label("Running command…");
+        }
         std::thread::spawn(move || {
             let events = tx.clone();
             let result = runtime.request(&ext, &method, params, cancel, |event| {
@@ -1153,7 +1253,10 @@ impl Ui {
                             ui.effect(&event);
                         }
                         if done {
-                            ui.status.set_label("Esc to go back");
+                            if !quiet {
+                                ui.status.set_label("Esc to go back");
+                            }
+                            ui.schedule_refresh();
                             return;
                         }
                     }
@@ -1164,6 +1267,40 @@ impl Ui {
                 }
             }
         });
+    }
+    /// Lists may ask to be queried again after `refresh` ms, for live clocks.
+    /// The refresh waits while a menu is open or another view is showing.
+    fn schedule_refresh(self: &Rc<Self>) {
+        let Some(delay) = self.view.borrow()["refresh"].as_u64() else {
+            return;
+        };
+        if self.view.borrow()["type"] != "list" {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        let source = glib::timeout_add_local_once(
+            Duration::from_millis(delay.clamp(500, 60_000)),
+            move || {
+                let Some(ui) = weak.upgrade() else { return };
+                ui.refresh.borrow_mut().take();
+                let idle = ui.active.borrow().is_some()
+                    && ui.window.is_visible()
+                    && ui.stack.visible_child_name().as_deref() == Some("results");
+                if !idle {
+                    return;
+                }
+                if ui.action_button.is_active() {
+                    // Try again once the actions menu closes.
+                    ui.schedule_refresh();
+                    return;
+                }
+                let query = ui.entry.text().to_string();
+                ui.extension_request_with("command.query", json!({ "query": query }), true);
+            },
+        );
+        if let Some(old) = self.refresh.borrow_mut().replace(source) {
+            old.remove();
+        }
     }
     fn effect(&self, event: &Value) {
         let text = event["text"].as_str().unwrap_or("");
@@ -1207,10 +1344,20 @@ impl Ui {
                         },
                     })
                     .collect();
+                let raw: Vec<Value> = view["items"].as_array().into_iter().flatten().take(100).cloned().collect();
+                let sections = raw
+                    .iter()
+                    .map(|i| i["section"].as_str().unwrap_or("").to_owned())
+                    .collect();
+                if let Some(placeholder) = view["placeholder"].as_str() {
+                    self.entry.set_placeholder_text(Some(placeholder));
+                }
+                self.side_scroll.set_visible(view["detail"].as_bool() == Some(true));
                 self.stack.set_visible_child_name("results");
-                self.set_items(items, Vec::new());
+                self.set_items(items, sections, raw);
             }
             Some("detail") | Some("form") => {
+                self.side_scroll.set_visible(false);
                 while let Some(child) = self.detail.first_child() {
                     self.detail.remove(&child);
                 }
@@ -1303,7 +1450,7 @@ fn section(kind: &Kind) -> &'static str {
 }
 
 /// One result: icon, title and subtitle, and a small kind badge on the right.
-fn result_row(item: &Item, favorite: bool) -> gtk::Box {
+fn result_row(item: &Item, favorite: bool, decor: &Value) -> gtk::Box {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     let icon = gio::Icon::for_string(&item.icon)
         .ok()
@@ -1361,6 +1508,9 @@ fn result_row(item: &Item, favorite: bool) -> gtk::Box {
         badge.add_css_class("result-kind");
         badge.set_valign(gtk::Align::Center);
         content.append(&badge);
+    }
+    if !decor.is_null() {
+        rich::decorate(&icon, &text, &content, decor);
     }
     content
 }
@@ -1529,6 +1679,97 @@ mod tests {
                 capture(&format!("lumen-files-{suffix}"));
             }
             styles.set_color_scheme(adw::ColorScheme::Default);
+        }
+        ui.hide();
+        ui.window.destroy();
+    }
+    /// Renders saved extension views for visual review: every `*.json` view in
+    /// LUMEN_VIEW_DIR becomes `<name>-light.png` and `<name>-dark.png` in
+    /// LUMEN_SCREENSHOT. LUMEN_VIEW_SELECT picks rows, as in `ports-1=2,speed-1=3`.
+    /// A view's optional `_scope` names the command in the search bar chip, and
+    /// `_query` fills the search field.
+    #[test]
+    #[ignore = "requires a GNOME display and LUMEN_VIEW_DIR; run isolated with --test-threads=1"]
+    fn extension_view_screenshots() {
+        let (Some(views), Some(out)) = (
+            std::env::var_os("LUMEN_VIEW_DIR"),
+            std::env::var_os("LUMEN_SCREENSHOT"),
+        ) else {
+            return;
+        };
+        adw::init().unwrap();
+        let app = adw::Application::builder()
+            .application_id("io.github.gnomelauncher.ViewTest")
+            .build();
+        app.register(None::<&gio::Cancellable>).unwrap();
+        let ui = Ui::new(&app);
+        ui.show();
+        spin_until(|| ui.window.is_mapped());
+        let selections: std::collections::HashMap<String, i32> = std::env::var("LUMEN_VIEW_SELECT")
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|pair| pair.split_once('='))
+            .filter_map(|(name, row)| Some((name.to_owned(), row.parse().ok()?)))
+            .collect();
+        let ext = package::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/quick-links"),
+        )
+        .unwrap();
+        let mut files: Vec<_> = std::fs::read_dir(&views)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .collect();
+        files.sort();
+        let out = std::path::PathBuf::from(out);
+        std::fs::create_dir_all(&out).unwrap();
+        let settle = |ms| {
+            let context = glib::MainContext::default();
+            let until = Instant::now() + Duration::from_millis(ms);
+            while Instant::now() < until {
+                while context.pending() {
+                    context.iteration(false);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let styles = adw::StyleManager::default();
+        for (scheme, suffix) in [
+            (adw::ColorScheme::ForceLight, "light"),
+            (adw::ColorScheme::ForceDark, "dark"),
+        ] {
+            styles.set_color_scheme(scheme);
+            for file in &files {
+                let name = file.file_stem().unwrap().to_string_lossy().to_string();
+                let view: Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+                crate::extensions::runtime::validate_view(&view).unwrap();
+                ui.back();
+                *ui.active.borrow_mut() = Some((ext.clone(), "links".into()));
+                ui.scope.set_visible(true);
+                let scope = view["_scope"].as_str().unwrap_or(&name).to_owned();
+                ui.scope.set_child(Some(&{
+                    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                    content.append(&gtk::Image::from_icon_name("go-previous-symbolic"));
+                    content.append(&gtk::Label::new(Some(&scope)));
+                    content
+                }));
+                ui.status.set_label("Esc to go back");
+                ui.suppress_search.set(true);
+                ui.entry.set_text(view["_query"].as_str().unwrap_or(""));
+                ui.suppress_search.set(false);
+                ui.render_view(view);
+                if let Some(row) = ui.list.row_at_index(*selections.get(&name).unwrap_or(&0)) {
+                    ui.list.select_row(Some(&row));
+                }
+                settle(400);
+                let paintable = gtk::WidgetPaintable::new(Some(&ui.window));
+                let snapshot = gtk::Snapshot::new();
+                paintable.snapshot(&snapshot, ui.window.width() as f64, ui.window.height() as f64);
+                let node = snapshot.to_node().unwrap();
+                let texture = ui.window.renderer().unwrap().render_texture(&node, None);
+                texture.save_to_png(out.join(format!("{name}-{suffix}.png"))).unwrap();
+            }
         }
         ui.hide();
         ui.window.destroy();

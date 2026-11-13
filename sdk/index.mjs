@@ -28,7 +28,10 @@ export function update(view) {
   if (!request || request.signal.aborted) return;
   send({jsonrpc: '2.0', method: 'view.update', params: {request_id: request.id, view}});
 }
-export function list(items, title) { return {type: 'list', items, title}; }
+/** `options` is a title string, or {title, placeholder, detail, refresh, empty}. */
+export function list(items, options) {
+  return typeof options === 'object' && options !== null ? {type: 'list', items, ...options} : {type: 'list', items, title: options};
+}
 export function detail(title, text) { return {type: 'detail', title, text}; }
 export function form(title, fields, submit_label = 'Submit') { return {type: 'form', title, fields, submit_label}; }
 

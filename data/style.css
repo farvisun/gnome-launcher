@@ -250,3 +250,150 @@ popover.actions-menu separator {
 .detail button.pill {
   margin-top: 8px;
 }
+
+/* Extension list decorations: tints, accessories, tags and row progress.
+   Each tint mixes a GNOME mid-tone with the window text colour, so it turns
+   darker on light backgrounds and lighter on dark ones. Palette variables are
+   avoided: distributions restyle them (Ubuntu's purple is near-black). */
+.tint-accent,
+.results > row:selected image.symbolic-tile.tint-accent {
+  color: var(--accent-color);
+}
+.tint-dim {
+  opacity: 0.55;
+}
+.tint-red,
+.results > row:selected image.symbolic-tile.tint-red {
+  color: color-mix(in srgb, #e01b24 72%, var(--window-fg-color));
+}
+progressbar.tint-red > trough > progress {
+  background-color: color-mix(in srgb, #e01b24 72%, var(--window-fg-color));
+}
+.tint-orange,
+.results > row:selected image.symbolic-tile.tint-orange {
+  color: color-mix(in srgb, #e66100 72%, var(--window-fg-color));
+}
+progressbar.tint-orange > trough > progress {
+  background-color: color-mix(in srgb, #e66100 72%, var(--window-fg-color));
+}
+.tint-yellow,
+.results > row:selected image.symbolic-tile.tint-yellow {
+  color: color-mix(in srgb, #d19a00 72%, var(--window-fg-color));
+}
+progressbar.tint-yellow > trough > progress {
+  background-color: color-mix(in srgb, #d19a00 72%, var(--window-fg-color));
+}
+.tint-green,
+.results > row:selected image.symbolic-tile.tint-green {
+  color: color-mix(in srgb, #26a269 72%, var(--window-fg-color));
+}
+progressbar.tint-green > trough > progress {
+  background-color: color-mix(in srgb, #26a269 72%, var(--window-fg-color));
+}
+.tint-blue,
+.results > row:selected image.symbolic-tile.tint-blue {
+  color: color-mix(in srgb, #3584e4 72%, var(--window-fg-color));
+}
+progressbar.tint-blue > trough > progress {
+  background-color: color-mix(in srgb, #3584e4 72%, var(--window-fg-color));
+}
+.tint-purple,
+.results > row:selected image.symbolic-tile.tint-purple {
+  color: color-mix(in srgb, #9141ac 72%, var(--window-fg-color));
+}
+progressbar.tint-purple > trough > progress {
+  background-color: color-mix(in srgb, #9141ac 72%, var(--window-fg-color));
+}
+image.symbolic-tile.tint-red, image.symbolic-tile.tint-orange, image.symbolic-tile.tint-yellow,
+image.symbolic-tile.tint-green, image.symbolic-tile.tint-blue, image.symbolic-tile.tint-purple,
+image.symbolic-tile.tint-accent {
+  background-color: alpha(currentColor, 0.14);
+}
+.accessory {
+  margin-left: 10px;
+  font-size: 12px;
+  opacity: 0.6;
+  font-feature-settings: "tnum";
+}
+.results > row:selected .accessory {
+  opacity: 0.8;
+}
+label.tag {
+  margin-left: 6px;
+  padding: 1px 8px;
+  min-height: 18px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background-color: alpha(currentColor, 0.13);
+  font-feature-settings: "tnum";
+}
+label.tag.plain {
+  color: alpha(currentColor, 0.75);
+}
+progressbar.row-progress {
+  margin-top: 5px;
+  margin-right: 8px;
+}
+progressbar.row-progress > trough,
+progressbar.row-progress > trough > progress {
+  min-height: 3px;
+  border-radius: 3px;
+}
+progressbar.row-progress > trough {
+  background-color: alpha(currentColor, 0.1);
+}
+
+/* Detail side pane beside an extension list */
+.side-pane {
+  padding: 16px 18px 18px;
+  border-left: 1px solid alpha(currentColor, 0.07);
+  background-color: alpha(currentColor, 0.02);
+}
+.side-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.hero-value {
+  font-size: 34px;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+}
+.hero-unit {
+  font-size: 15px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+progressbar.hero-progress > trough,
+progressbar.hero-progress > trough > progress {
+  min-height: 6px;
+  border-radius: 6px;
+}
+progressbar.hero-progress > trough {
+  background-color: alpha(currentColor, 0.1);
+}
+.hero-caption {
+  font-size: 12px;
+  opacity: 0.55;
+}
+.side-text {
+  font-size: 13px;
+}
+.metadata {
+  margin-top: 4px;
+}
+.metadata-label {
+  font-size: 12px;
+  opacity: 0.55;
+}
+.metadata-value {
+  font-size: 13px;
+  font-feature-settings: "tnum";
+}
+.metadata label.tag {
+  margin-left: 0;
+}
+.metadata flowboxchild {
+  padding: 0;
+  min-height: 0;
+}

@@ -64,7 +64,20 @@ serve({hello: {
 
 Native views:
 
-- `list(items, title?)`: up to 100 unique item IDs, title, optional subtitle/icon, and optional actions. Icons are GNOME icon names. Ctrl+K exposes additional actions.
+- `list(items, options?)`: up to 100 unique item IDs, title, optional subtitle/icon, and optional actions. Icons are GNOME icon names. Ctrl+K exposes additional actions, and the footer names the first action as what Enter does. `options` is a title string or an object:
+  - `placeholder`: search field hint while the list shows.
+  - `detail: true`: shows a side pane with the selected item's `detail`.
+  - `refresh`: query the command again after this many milliseconds (500–60000) while the list stays open and idle, for live clocks.
+  - `empty: {title, description?, icon?}`: what to show when `items` is empty.
+
+  Items may also set:
+  - `section`: consecutive items with the same section share a header.
+  - `tint`: colour for the icon.
+  - `progress`: 0–1, a thin bar under the subtitle.
+  - `accessories`: up to 6 right-aligned `{text?, icon?, tag?, color?, tooltip?}`. A `tag` is drawn as a coloured pill.
+  - `detail`: side-pane content, any of `hero: {value, unit?, caption?, progress?, color?}`, `chart: {values, caption?, color?}` (a sparkline of up to 200 numbers), `text`, and `metadata: [{label, text?, color?, tags?: [{text, color?}]} | {separator: true}]`.
+
+  Colours are `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `accent` and `dim`; they follow the GNOME palette in light and dark styles.
 - `detail(title, text)`: selectable plain text, up to 100 KB. Arbitrary HTML and webviews are unsupported.
 - `form(title, fields, submitLabel?)`: up to 30 fields, with unique IDs, labels, and `text`, `password`, or `boolean` types. Optional `required`, `placeholder`, and `value` attributes. Submission calls the command's `submit` handler.
 

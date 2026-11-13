@@ -105,7 +105,12 @@ impl Preference {
         match (&self.default, self.kind.as_str()) {
             (Some(value), _) => value.clone(),
             (None, "checkbox") => false.into(),
-            (None, "dropdown") => self.data.first().map(|c| c.value.clone()).unwrap_or_default().into(),
+            (None, "dropdown") => self
+                .data
+                .first()
+                .map(|c| c.value.clone())
+                .unwrap_or_default()
+                .into(),
             _ => "".into(),
         }
     }
@@ -113,7 +118,9 @@ impl Preference {
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
-        && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+        && name
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
 }
 fn check_choices(data: &[Choice], dropdown: bool) -> Result<()> {
     ensure!(data.len() <= 100, "Too many dropdown choices");
@@ -140,7 +147,10 @@ fn check_preferences(preferences: &[Preference]) -> Result<()> {
             p.kind
         );
         ensure!(
-            !p.title.is_empty() && p.title.len() <= 120 && p.description.len() <= 500 && p.label.len() <= 120,
+            !p.title.is_empty()
+                && p.title.len() <= 120
+                && p.description.len() <= 500
+                && p.label.len() <= 120,
             "Invalid preference title or description"
         );
         check_choices(&p.data, p.kind == "dropdown")?;
@@ -238,7 +248,10 @@ pub fn load(directory: &Path) -> Result<Extension> {
             "Invalid command title"
         );
         ensure!(valid_icon(&command.icon), "Invalid command icon name");
-        ensure!(command.arguments.len() <= 3, "A command takes at most 3 arguments");
+        ensure!(
+            command.arguments.len() <= 3,
+            "A command takes at most 3 arguments"
+        );
         let mut names = BTreeSet::new();
         for a in &command.arguments {
             ensure!(
@@ -250,7 +263,10 @@ pub fn load(directory: &Path) -> Result<Extension> {
                 "Unknown argument type: {}",
                 a.kind
             );
-            ensure!(a.placeholder.len() <= 60, "Argument placeholder is too long");
+            ensure!(
+                a.placeholder.len() <= 60,
+                "Argument placeholder is too long"
+            );
             check_choices(&a.data, a.kind == "dropdown")?;
         }
         check_preferences(&command.preferences)?;
@@ -548,9 +564,18 @@ mod tests {
         let mut store = store::Store::default();
         store.developers.insert(temp.path().join("developer"));
         let found = discover_in(Some(&temp.path().join("builtin")), &store);
-        let ext = found.iter().find(|e| e.manifest.id == "test.example").unwrap();
+        let ext = found
+            .iter()
+            .find(|e| e.manifest.id == "test.example")
+            .unwrap();
         assert!(ext.builtin);
-        assert_eq!(found.iter().filter(|e| e.manifest.id == "test.example").count(), 1);
+        assert_eq!(
+            found
+                .iter()
+                .filter(|e| e.manifest.id == "test.example")
+                .count(),
+            1
+        );
     }
     #[test]
     fn rejects_reserved_ids_and_bad_icons() {
@@ -558,10 +583,18 @@ mod tests {
         let root = temp.path().join("stage");
         fixture(&root);
         let manifest = fs::read_to_string(root.join("extension.json")).unwrap();
-        fs::write(root.join("extension.json"), manifest.replace("test.example", "lumen.fake")).unwrap();
+        fs::write(
+            root.join("extension.json"),
+            manifest.replace("test.example", "lumen.fake"),
+        )
+        .unwrap();
         assert!(install(&root, &temp.path().join("installed"), false).is_err());
         let manifest = fs::read_to_string(root.join("extension.json")).unwrap();
-        fs::write(root.join("extension.json"), manifest.replace(r#""title":"Hello""#, r#""title":"Hello","icon":"../x""#)).unwrap();
+        fs::write(
+            root.join("extension.json"),
+            manifest.replace(r#""title":"Hello""#, r#""title":"Hello","icon":"../x""#),
+        )
+        .unwrap();
         assert!(load(&root).is_err());
     }
     #[test]
@@ -603,7 +636,10 @@ mod tests {
         let command = &ok.manifest.commands[0];
         assert_eq!(command.mode, Mode::NoView);
         assert_eq!(command.arguments[0].kind, "text");
-        assert_eq!(ok.manifest.preferences[0].fallback(), serde_json::json!("metric"));
+        assert_eq!(
+            ok.manifest.preferences[0].fallback(),
+            serde_json::json!("metric")
+        );
         assert_eq!(command.preferences[0].fallback(), serde_json::json!(false));
         assert!(write(r#"{"id":"test.args","name":"Args","version":"1","sdk_version":1,"entry":"index.mjs",
             "commands":[{"id":"a","title":"A","arguments":[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"}]}]}"#).is_err());
@@ -624,7 +660,10 @@ mod tests {
             "lumen.weather",
             "lumen.sips",
         ] {
-            assert!(found.iter().any(|e| e.manifest.id == id && e.builtin), "{id}");
+            assert!(
+                found.iter().any(|e| e.manifest.id == id && e.builtin),
+                "{id}"
+            );
         }
     }
 }

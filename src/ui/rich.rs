@@ -18,7 +18,11 @@ pub(super) fn tint(widget: &impl IsA<gtk::Widget>, color: &Value) {
 /// An icon name, or the path of an image an extension ships (symbolic when
 /// named `*-symbolic.svg`, so it follows the text colour and tints).
 pub(super) fn icon(name: &str) -> gtk::Image {
-    match name.starts_with('/').then(|| gtk::gio::Icon::for_string(name).ok()).flatten() {
+    match name
+        .starts_with('/')
+        .then(|| gtk::gio::Icon::for_string(name).ok())
+        .flatten()
+    {
         Some(icon) => gtk::Image::from_gicon(&icon),
         None => gtk::Image::from_icon_name(name),
     }
@@ -38,7 +42,10 @@ fn tag_tint(label: &gtk::Label, color: &Value) {
 pub fn decorate(icon: &gtk::Image, text: &gtk::Box, content: &gtk::Box, item: &Value) {
     tint(icon, &item["tint"]);
     // Accessories never squeeze the title below a readable width.
-    if item["accessories"].as_array().is_some_and(|a| !a.is_empty()) {
+    if item["accessories"]
+        .as_array()
+        .is_some_and(|a| !a.is_empty())
+    {
         text.set_size_request(80, -1);
     }
     if let Some(progress) = item["progress"].as_f64() {
@@ -125,7 +132,11 @@ pub fn fill_detail(pane: &gtk::Box, item: &Value) {
             pane.append(&bar);
         }
         if let Some(caption) = hero["caption"].as_str() {
-            let caption = gtk::Label::builder().label(caption).xalign(0.).wrap(true).build();
+            let caption = gtk::Label::builder()
+                .label(caption)
+                .xalign(0.)
+                .wrap(true)
+                .build();
             caption.add_css_class("hero-caption");
             pane.append(&caption);
         }
@@ -177,7 +188,10 @@ pub(super) fn picture(path: &str, width: i32, height: i32) -> gtk::Picture {
 /// Label/value rows, separators and tag rows, as Raycast's metadata.
 pub(super) fn metadata_grid(metadata: &Value) -> Option<gtk::Grid> {
     let rows = metadata.as_array().into_iter().flatten().take(40);
-    let grid = gtk::Grid::builder().column_spacing(12).row_spacing(6).build();
+    let grid = gtk::Grid::builder()
+        .column_spacing(12)
+        .row_spacing(6)
+        .build();
     grid.add_css_class("metadata");
     let mut line = 0;
     for row in rows {

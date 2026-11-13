@@ -41,7 +41,13 @@ pub fn build(view: &Value, activate: impl Fn(usize) + Clone + 'static) -> Grid {
     let mut tiles = Vec::new();
     let mut sections: Vec<(usize, usize)> = Vec::new();
     let mut current: Option<(String, gtk::Grid)> = None;
-    for (index, item) in view["items"].as_array().into_iter().flatten().take(100).enumerate() {
+    for (index, item) in view["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(100)
+        .enumerate()
+    {
         let name = item["section"].as_str().unwrap_or("").to_owned();
         if current.as_ref().is_none_or(|(n, _)| *n != name) {
             if !name.is_empty() {
@@ -65,10 +71,21 @@ pub fn build(view: &Value, activate: impl Fn(usize) + Clone + 'static) -> Grid {
         let tile = tile(item, width, height);
         let activate = activate.clone();
         tile.connect_clicked(move |_| activate(index));
-        grid.attach(&tile, position % columns as i32, position / columns as i32, 1, 1);
+        grid.attach(
+            &tile,
+            position % columns as i32,
+            position / columns as i32,
+            1,
+            1,
+        );
         tiles.push(tile);
     }
-    Grid { root, tiles, sections, columns }
+    Grid {
+        root,
+        tiles,
+        sections,
+        columns,
+    }
 }
 
 fn tile(item: &Value, width: i32, height: i32) -> gtk::Button {
@@ -114,16 +131,30 @@ fn tile(item: &Value, width: i32, height: i32) -> gtk::Button {
         label.add_css_class("grid-subtitle");
         content.append(&label);
     }
-    let button = gtk::Button::builder().child(&content).focusable(false).build();
+    let button = gtk::Button::builder()
+        .child(&content)
+        .focusable(false)
+        .build();
     button.add_css_class("flat");
     button.add_css_class("grid-tile");
-    button.set_tooltip_text(item["tooltip"].as_str().or(Some(title)).filter(|t| !t.is_empty()));
+    button.set_tooltip_text(
+        item["tooltip"]
+            .as_str()
+            .or(Some(title))
+            .filter(|t| !t.is_empty()),
+    );
     button
 }
 
 /// The tile the arrow keys move to from `index`. Up and down keep the column,
 /// crossing into the neighbouring section at its nearest row.
-pub fn neighbour(sections: &[(usize, usize)], columns: usize, index: usize, dx: i32, dy: i32) -> usize {
+pub fn neighbour(
+    sections: &[(usize, usize)],
+    columns: usize,
+    index: usize,
+    dx: i32,
+    dy: i32,
+) -> usize {
     let total: usize = sections.iter().map(|s| s.1).sum();
     if total == 0 {
         return 0;
@@ -131,7 +162,10 @@ pub fn neighbour(sections: &[(usize, usize)], columns: usize, index: usize, dx: 
     if dx != 0 {
         return (index as i64 + i64::from(dx)).clamp(0, total as i64 - 1) as usize;
     }
-    let Some(at) = sections.iter().position(|&(start, len)| index >= start && index < start + len) else {
+    let Some(at) = sections
+        .iter()
+        .position(|&(start, len)| index >= start && index < start + len)
+    else {
         return index.min(total - 1);
     };
     let (start, len) = sections[at];

@@ -371,14 +371,18 @@ pub fn validate_view(view: &Value) -> Result<()> {
             }
             if let Some(refresh) = view.get("refresh") {
                 ensure!(
-                    refresh.as_u64().is_some_and(|ms| (500..=60_000).contains(&ms)),
+                    refresh
+                        .as_u64()
+                        .is_some_and(|ms| (500..=60_000).contains(&ms)),
                     "List refresh must be 500–60000 ms"
                 );
             }
             if kind == "grid" {
                 ensure!(
                     view["columns"].is_null()
-                        || view["columns"].as_u64().is_some_and(|c| (3..=8).contains(&c)),
+                        || view["columns"]
+                            .as_u64()
+                            .is_some_and(|c| (3..=8).contains(&c)),
                     "Grid columns must be 3–8"
                 );
                 ensure!(
@@ -390,7 +394,11 @@ pub fn validate_view(view: &Value) -> Result<()> {
             }
             optional_text(&view["placeholder"], 200, "placeholder")?;
             optional_text(&view["empty"]["title"], 200, "empty view title")?;
-            optional_text(&view["empty"]["description"], 1000, "empty view description")?;
+            optional_text(
+                &view["empty"]["description"],
+                1000,
+                "empty view description",
+            )?;
         }
         Some("detail") => {
             ensure!(
@@ -427,7 +435,9 @@ pub fn validate_view(view: &Value) -> Result<()> {
                     );
                 }
                 if kind == "dropdown" {
-                    let options = field["options"].as_array().context("A dropdown needs options")?;
+                    let options = field["options"]
+                        .as_array()
+                        .context("A dropdown needs options")?;
                     ensure!(
                         !options.is_empty()
                             && options.len() <= 100
@@ -448,8 +458,8 @@ pub fn validate_view(view: &Value) -> Result<()> {
 fn valid_image(path: &str) -> Result<()> {
     let path = std::path::Path::new(path);
     ensure!(path.is_absolute(), "Image must be an absolute path");
-    let meta = std::fs::metadata(path)
-        .with_context(|| format!("Missing image {}", path.display()))?;
+    let meta =
+        std::fs::metadata(path).with_context(|| format!("Missing image {}", path.display()))?;
     ensure!(
         meta.is_file() && meta.len() <= 10 * 1024 * 1024,
         "Image must be a file up to 10 MB"
@@ -501,11 +511,15 @@ fn validate_decoration(item: &Value) -> Result<()> {
     optional_color(&item["tint"])?;
     ensure!(
         item["progress"].is_null()
-            || item["progress"].as_f64().is_some_and(|p| (0. ..=1.).contains(&p)),
+            || item["progress"]
+                .as_f64()
+                .is_some_and(|p| (0. ..=1.).contains(&p)),
         "Progress must be between 0 and 1"
     );
     if !item["accessories"].is_null() {
-        let accessories = item["accessories"].as_array().context("Accessories must be a list")?;
+        let accessories = item["accessories"]
+            .as_array()
+            .context("Accessories must be a list")?;
         ensure!(accessories.len() <= 6, "At most 6 accessories per item");
         for accessory in accessories {
             optional_text(&accessory["text"], 100, "accessory text")?;
@@ -530,7 +544,10 @@ fn validate_decoration(item: &Value) -> Result<()> {
     optional_color(&detail["chart"]["color"])?;
     if let Some(values) = detail["chart"]["values"].as_array() {
         ensure!(
-            values.len() <= 200 && values.iter().all(|v| v.as_f64().is_some_and(f64::is_finite)),
+            values.len() <= 200
+                && values
+                    .iter()
+                    .all(|v| v.as_f64().is_some_and(f64::is_finite)),
             "Chart needs up to 200 finite numbers"
         );
     }
@@ -554,7 +571,10 @@ fn host(
         "host.open" => Some("open"),
         "host.notify" => Some("notifications"),
         "host.storage.get" | "host.storage.set" => Some("storage"),
-        "host.toast" | "host.hud" | "host.closeWindow" | "host.openPreferences"
+        "host.toast"
+        | "host.hud"
+        | "host.closeWindow"
+        | "host.openPreferences"
         | "host.chooseFiles" => None,
         _ => bail!("Unknown host method"),
     };
@@ -569,7 +589,9 @@ fn host(
         "host.chooseFiles" => {
             optional_text(&params["title"], 200, "chooser title")?;
             ensure!(
-                params["mimeTypes"].as_array().is_none_or(|m| m.len() <= 40 && m.iter().all(Value::is_string)),
+                params["mimeTypes"]
+                    .as_array()
+                    .is_none_or(|m| m.len() <= 40 && m.iter().all(Value::is_string)),
                 "mimeTypes must be a list of strings"
             );
             return ask(method, params, cancelled, event);
@@ -582,7 +604,8 @@ fn host(
             optional_text(&params["message"], 1000, "toast message")?;
             ensure!(
                 params["style"].is_null()
-                    || ["success", "failure", "animated"].contains(&params["style"].as_str().unwrap_or("")),
+                    || ["success", "failure", "animated"]
+                        .contains(&params["style"].as_str().unwrap_or("")),
                 "Toast style is success, failure or animated"
             );
             event(json!({"type":"effect", "method":method, "params":params}));
@@ -669,7 +692,8 @@ mod tests {
     }
     #[test]
     fn validates_grids_images_and_forms() {
-        let image = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/assets/lumen-timers-light.png");
+        let image = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/assets/lumen-timers-light.png");
         let image = image.to_str().unwrap();
         let grid = json!({"type":"grid","columns":5,"aspect":"1","push":true,"context":{"day":"x"},"selection":true,
             "items":[{"id":"a","title":"Blur","section":"Blur","content":{"image":image}},{"id":"b","title":"Icon","content":{"icon":"weather-clear-symbolic","tint":"yellow"}}]});
@@ -684,12 +708,22 @@ mod tests {
         bad["context"] = json!("x".repeat(5000));
         assert!(validate_view(&bad).is_err());
         assert!(validate_view(&json!({"type":"list","items":[{"id":"a","title":"A","icon":image,"detail":{"image":image}}]})).is_ok());
-        assert!(validate_view(&json!({"type":"list","items":[{"id":"a","title":"A","icon":"/no/such.png"}]})).is_err());
+        assert!(
+            validate_view(
+                &json!({"type":"list","items":[{"id":"a","title":"A","icon":"/no/such.png"}]})
+            )
+            .is_err()
+        );
         let form = json!({"type":"form","title":"F","fields":[
             {"id":"f","label":"Format","type":"dropdown","options":[{"value":"png","title":"PNG"}],"info":"Pick one"},
             {"id":"d","label":"","type":"description","text":"Help"}]});
         assert!(validate_view(&form).is_ok());
-        assert!(validate_view(&json!({"type":"form","fields":[{"id":"f","label":"F","type":"dropdown"}]})).is_err());
+        assert!(
+            validate_view(
+                &json!({"type":"form","fields":[{"id":"f","label":"F","type":"dropdown"}]})
+            )
+            .is_err()
+        );
         assert!(validate_view(&json!({"type":"detail","text":"x","image":image,"metadata":[{"label":"A","text":"b"}]})).is_ok());
     }
     #[test]

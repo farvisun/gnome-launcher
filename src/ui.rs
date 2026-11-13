@@ -33,6 +33,9 @@ const RESULT_LIMIT: usize = 40;
 const SECTION_LIMIT: usize = 8;
 
 type MenuAction = Box<dyn Fn(&Rc<Ui>)>;
+/// A form or argument field: its ID, widget, whether it is required, and a
+/// dropdown's values (empty for other widgets).
+type Field = (String, gtk::Widget, bool, Vec<String>);
 
 /// A searchable item with its text lowercased once, when the catalog is built.
 struct Candidate {
@@ -112,7 +115,7 @@ pub struct Ui {
     spinner: gtk::Spinner,
     /// Inline argument fields for the selected command, beside the search.
     arguments: gtk::Box,
-    argument_fields: RefCell<Vec<(String, gtk::Widget, bool, Vec<String>)>>,
+    argument_fields: RefCell<Vec<Field>>,
     argument_owner: RefCell<String>,
     grid_scroll: gtk::ScrolledWindow,
     grid: RefCell<Option<grid::Grid>>,
@@ -120,7 +123,7 @@ pub struct Ui {
     /// The selected item's ID when a `selection` event was last sent.
     selected_id: RefCell<String>,
     select_debounce: RefCell<Option<glib::SourceId>>,
-    form: RefCell<Vec<(String, gtk::Widget, bool, Vec<String>)>>,
+    form: RefCell<Vec<Field>>,
     pub(super) settings_window: RefCell<Option<adw::PreferencesWindow>>,
     /// Each extension's expander in Settings, to open one from a command.
     pub(super) settings_rows: RefCell<Vec<(String, adw::ExpanderRow)>>,
@@ -161,7 +164,9 @@ pub fn run(args: &[String]) {
         action.connect_activate(move |_, parameter| {
             let Some(ui) = weak.upgrade() else { return };
             // An optional `#<json>` suffix is the command's launch context.
-            let Some(target) = parameter.and_then(|p| p.str()) else { return };
+            let Some(target) = parameter.and_then(|p| p.str()) else {
+                return;
+            };
             let (target, context) = match target.split_once('#') {
                 Some((target, json)) => (target, serde_json::from_str(json).unwrap_or(Value::Null)),
                 None => (target, Value::Null),
@@ -170,7 +175,8 @@ pub fn run(args: &[String]) {
                 return;
             };
             ui.show();
-            if let Err(e) = ui.open_command(extension, command, json!({"launch_context": context})) {
+            if let Err(e) = ui.open_command(extension, command, json!({"launch_context": context}))
+            {
                 ui.status.set_label(&format!("{e:#}"));
             }
         });
@@ -963,7 +969,12 @@ impl Ui {
         let same_rows = !items.is_empty()
             && self.rendered.borrow().0 == sections
             && self.results.borrow().len() == items.len()
-            && self.results.borrow().iter().zip(&items).all(|(a, b)| a.id == b.id);
+            && self
+                .results
+                .borrow()
+                .iter()
+                .zip(&items)
+                .all(|(a, b)| a.id == b.id);
         if same_rows {
             for (index, item) in items.iter().enumerate() {
                 if let Some(row) = self.list.row_at_index(index as i32) {
@@ -1095,18 +1106,29 @@ impl Ui {
             self.results.borrow().get(index).map(|item| {
                 match (&item.kind, self.active.borrow().is_some()) {
                     // An extension names its Enter action as the row's first action.
-                    (_, true) => self.rendered.borrow().2.get(index)
+                    (_, true) => self
+                        .rendered
+                        .borrow()
+                        .2
+                        .get(index)
                         .and_then(|i| i["actions"][0]["title"].as_str().map(str::to_owned))
                         .unwrap_or_else(|| "Select".into()),
                     (Kind::Calculation(_), _) => "Copy".into(),
                     (Kind::Command { .. }, _) => {
-                        if self.arguments.is_visible() { "Run with Arguments".into() } else { "Run".into() }
+                        if self.arguments.is_visible() {
+                            "Run with Arguments".into()
+                        } else {
+                            "Run".into()
+                        }
                     }
                     _ => "Open".into(),
                 }
             })
         });
-        let results = matches!(self.stack.visible_child_name().as_deref(), Some("results" | "grid"));
+        let results = matches!(
+            self.stack.visible_child_name().as_deref(),
+            Some("results" | "grid")
+        );
         self.primary_hint.set_visible(verb.is_some() && results);
         if let Some(verb) = verb {
             self.primary_label.set_label(&verb);
@@ -1194,7 +1216,12 @@ impl Ui {
     }
     /// Enters an extension command, as if its result had been chosen.
     /// `launch` carries its `arguments` and `launch_context`.
-    fn open_command(self: &Rc<Self>, extension: &str, command: &str, launch: Value) -> anyhow::Result<()> {
+    fn open_command(
+        self: &Rc<Self>,
+        extension: &str,
+        command: &str,
+        launch: Value,
+    ) -> anyhow::Result<()> {
         let ext = self
             .extensions
             .borrow()
@@ -1260,7 +1287,13 @@ impl Ui {
                     .borrow()
                     .iter()
                     .find(|e| &e.manifest.id == extension)
-                    .and_then(|e| e.manifest.commands.iter().find(|c| &c.id == command).cloned())
+                    .and_then(|e| {
+                        e.manifest
+                            .commands
+                            .iter()
+                            .find(|c| &c.id == command)
+                            .cloned()
+                    })
                     .filter(|c| !c.arguments.is_empty())
                     .map(|c| (item.id.clone(), c)),
                 _ => None,
@@ -1346,12 +1379,16 @@ impl Ui {
                 let text = entry.text();
                 if *required && text.trim().is_empty() {
                     entry.grab_focus();
-                    self.status.set_label("Fill in the required arguments, then press Enter");
+                    self.status
+                        .set_label("Fill in the required arguments, then press Enter");
                     return None;
                 }
                 values.insert(name.clone(), json!(text.as_str()));
             } else if let Some(dropdown) = widget.downcast_ref::<gtk::DropDown>() {
-                let value = choices.get(dropdown.selected() as usize).cloned().unwrap_or_default();
+                let value = choices
+                    .get(dropdown.selected() as usize)
+                    .cloned()
+                    .unwrap_or_default();
                 values.insert(name.clone(), json!(value));
             }
         }
@@ -1373,13 +1410,18 @@ impl Ui {
             if let Some(old) = grid.tiles.get(self.grid_selected.get()) {
                 old.remove_css_class("selected");
             }
-            let Some(tile) = grid.tiles.get(index) else { return };
+            let Some(tile) = grid.tiles.get(index) else {
+                return;
+            };
             tile.add_css_class("selected");
             self.grid_selected.set(index);
             // Scroll the tile into view without moving focus out of the search field.
             let adjustment = self.grid_scroll.vadjustment();
             if let Some(bounds) = tile.compute_bounds(&grid.root) {
-                let (top, bottom) = (f64::from(bounds.y()), f64::from(bounds.y() + bounds.height()));
+                let (top, bottom) = (
+                    f64::from(bounds.y()),
+                    f64::from(bounds.y() + bounds.height()),
+                );
                 if top < adjustment.value() {
                     adjustment.set_value((top - 28.).max(0.));
                 } else if bottom > adjustment.value() + adjustment.page_size() {
@@ -1560,9 +1602,13 @@ impl Ui {
         let generation = self.generation.get();
         params["command"] = json!(command);
         params["query"] = json!(self.entry.text().as_str());
-        params["preferences"] = Value::Object(self.state.borrow().preference_values(&ext, &command));
+        params["preferences"] =
+            Value::Object(self.state.borrow().preference_values(&ext, &command));
         let launch = self.launch.borrow();
-        params["arguments"] = launch.get("arguments").cloned().unwrap_or_else(|| json!({}));
+        params["arguments"] = launch
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
         params["launch_context"] = launch.get("launch_context").cloned().unwrap_or(Value::Null);
         drop(launch);
         let context = &self.view.borrow()["context"];
@@ -1580,7 +1626,11 @@ impl Ui {
         let (tx, mut rx) = futures_channel::mpsc::unbounded();
         if !quiet {
             self.clear_toast();
-            self.status.set_label(if self.no_view.get() { "Running…" } else { "Running command…" });
+            self.status.set_label(if self.no_view.get() {
+                "Running…"
+            } else {
+                "Running command…"
+            });
         }
         self.failed.set(false);
         self.pending_hud.borrow_mut().take();
@@ -1610,7 +1660,10 @@ impl Ui {
                     Ok((done, event)) => {
                         if event["type"] == "view" && !event["view"].is_null() {
                             let view = event["view"].clone();
-                            if may_push && view["push"] == true && ui.pushed.get() != Some(generation) {
+                            if may_push
+                                && view["push"] == true
+                                && ui.pushed.get() != Some(generation)
+                            {
                                 ui.push_current();
                                 ui.pushed.set(Some(generation));
                             }
@@ -1644,7 +1697,9 @@ impl Ui {
         if view.is_null() {
             return;
         }
-        self.views.borrow_mut().push((view, self.entry.text().to_string()));
+        self.views
+            .borrow_mut()
+            .push((view, self.entry.text().to_string()));
         self.suppress_search.set(true);
         self.entry.set_text("");
         self.suppress_search.set(false);
@@ -1655,7 +1710,8 @@ impl Ui {
     fn finish(self: &Rc<Self>, quiet: bool) {
         self.spinner.set_visible(false);
         let hud = self.pending_hud.borrow_mut().take();
-        let close = self.pending_close.get() || hud.is_some() || (self.no_view.get() && !self.failed.get());
+        let close =
+            self.pending_close.get() || hud.is_some() || (self.no_view.get() && !self.failed.get());
         if close {
             self.hide();
             if let Some(text) = hud {
@@ -1686,7 +1742,9 @@ impl Ui {
     }
     /// Answers a host call that needs the desktop: the clipboard or a file chooser.
     fn answer(self: &Rc<Self>, event: &Value) {
-        let Some(id) = event["id"].as_u64() else { return };
+        let Some(id) = event["id"].as_u64() else {
+            return;
+        };
         match event["method"].as_str() {
             Some("host.readClipboard") => {
                 let clipboard = self.window.clipboard();
@@ -1714,14 +1772,12 @@ impl Ui {
                         let saved = result.ok().flatten().and_then(|texture| {
                             let dir = glib::user_runtime_dir().join("gnome-launcher");
                             std::fs::create_dir_all(&dir).ok()?;
-                            let path = dir.join(format!("clipboard-{}.png", glib::monotonic_time()));
+                            let path =
+                                dir.join(format!("clipboard-{}.png", glib::monotonic_time()));
                             texture.save_to_png(&path).ok()?;
                             Some(path)
                         });
-                        runtime::answer(
-                            id,
-                            Ok(saved.map_or(json!({}), |p| json!({ "image": p }))),
-                        );
+                        runtime::answer(id, Ok(saved.map_or(json!({}), |p| json!({ "image": p }))));
                     });
                 } else {
                     clipboard.read_text_async(None::<&gio::Cancellable>, move |result| {
@@ -1738,7 +1794,9 @@ impl Ui {
                     .build();
                 if let Some(types) = params["mimeTypes"].as_array().filter(|t| !t.is_empty()) {
                     let filter = gtk::FileFilter::new();
-                    filter.set_name(Some(params["filterName"].as_str().unwrap_or("Supported files")));
+                    filter.set_name(Some(
+                        params["filterName"].as_str().unwrap_or("Supported files"),
+                    ));
                     for mime in types.iter().filter_map(Value::as_str) {
                         filter.add_mime_type(mime);
                     }
@@ -1757,22 +1815,39 @@ impl Ui {
                     runtime::answer(id, Ok(json!({ "files": paths })));
                 };
                 if params["multiple"] == false {
-                    dialog.open(Some(&self.window), None::<&gio::Cancellable>, move |result| {
-                        done(result.ok().and_then(|f| f.path()).map(|p| p.display().to_string()).into_iter().collect())
-                    });
-                } else {
-                    dialog.open_multiple(Some(&self.window), None::<&gio::Cancellable>, move |result| {
-                        let paths = result
-                            .ok()
-                            .map(|files| {
-                                (0..files.n_items())
-                                    .filter_map(|i| files.item(i)?.downcast::<gio::File>().ok()?.path())
+                    dialog.open(
+                        Some(&self.window),
+                        None::<&gio::Cancellable>,
+                        move |result| {
+                            done(
+                                result
+                                    .ok()
+                                    .and_then(|f| f.path())
                                     .map(|p| p.display().to_string())
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        done(paths)
-                    });
+                                    .into_iter()
+                                    .collect(),
+                            )
+                        },
+                    );
+                } else {
+                    dialog.open_multiple(
+                        Some(&self.window),
+                        None::<&gio::Cancellable>,
+                        move |result| {
+                            let paths = result
+                                .ok()
+                                .map(|files| {
+                                    (0..files.n_items())
+                                        .filter_map(|i| {
+                                            files.item(i)?.downcast::<gio::File>().ok()?.path()
+                                        })
+                                        .map(|p| p.display().to_string())
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            done(paths)
+                        },
+                    );
                 }
             }
             _ => runtime::answer(id, Err("Unsupported host request".into())),
@@ -1795,7 +1870,10 @@ impl Ui {
                 ui.refresh.borrow_mut().take();
                 let idle = ui.active.borrow().is_some()
                     && ui.window.is_visible()
-                    && matches!(ui.stack.visible_child_name().as_deref(), Some("results" | "grid"));
+                    && matches!(
+                        ui.stack.visible_child_name().as_deref(),
+                        Some("results" | "grid")
+                    );
                 if !idle {
                     return;
                 }
@@ -1838,10 +1916,12 @@ impl Ui {
                 let style = params["style"].as_str().unwrap_or("success");
                 self.status.add_css_class(&format!("toast-{style}"));
                 let title = params["title"].as_str().unwrap_or("");
-                self.status.set_label(&match params["message"].as_str().filter(|m| !m.is_empty()) {
-                    Some(message) => format!("{title} · {message}"),
-                    None => title.to_owned(),
-                });
+                self.status.set_label(
+                    &match params["message"].as_str().filter(|m| !m.is_empty()) {
+                        Some(message) => format!("{title} · {message}"),
+                        None => title.to_owned(),
+                    },
+                );
                 self.status.set_tooltip_text(params["message"].as_str());
                 if style == "animated" {
                     self.spinner.set_visible(true);
@@ -1852,7 +1932,12 @@ impl Ui {
             Some("host.hud") => *self.pending_hud.borrow_mut() = Some(text.to_owned()),
             Some("host.closeWindow") => self.pending_close.set(true),
             Some("host.openPreferences") => {
-                if let Some(id) = self.active.borrow().as_ref().map(|(e, _)| e.manifest.id.clone()) {
+                if let Some(id) = self
+                    .active
+                    .borrow()
+                    .as_ref()
+                    .map(|(e, _)| e.manifest.id.clone())
+                {
                     self.open_settings_at(&id);
                 }
             }
@@ -1885,7 +1970,13 @@ impl Ui {
                 },
             })
             .collect();
-        let raw: Vec<Value> = view["items"].as_array().into_iter().flatten().take(100).cloned().collect();
+        let raw: Vec<Value> = view["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(100)
+            .cloned()
+            .collect();
         match view["type"].as_str() {
             Some("list") => {
                 self.grid.borrow_mut().take();
@@ -1893,7 +1984,8 @@ impl Ui {
                     .iter()
                     .map(|i| i["section"].as_str().unwrap_or("").to_owned())
                     .collect();
-                self.side_scroll.set_visible(view["detail"].as_bool() == Some(true));
+                self.side_scroll
+                    .set_visible(view["detail"].as_bool() == Some(true));
                 self.stack.set_visible_child_name("results");
                 self.set_items(items, sections, raw);
                 self.selection_changed();
@@ -1929,7 +2021,8 @@ impl Ui {
                     label.add_css_class("detail-body");
                     self.detail.append(&label);
                     if let Some(grid) = rich::metadata_grid(&view["metadata"]) {
-                        self.detail.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+                        self.detail
+                            .append(&gtk::Separator::new(gtk::Orientation::Horizontal));
                         self.detail.append(&grid);
                     }
                 } else {
@@ -2026,8 +2119,10 @@ impl Ui {
                     self.detail.append(&label_widget);
                     if kind == "dropdown" {
                         let options = field["options"].as_array().cloned().unwrap_or_default();
-                        let titles: Vec<&str> =
-                            options.iter().map(|o| o["title"].as_str().unwrap_or("")).collect();
+                        let titles: Vec<&str> = options
+                            .iter()
+                            .map(|o| o["title"].as_str().unwrap_or(""))
+                            .collect();
                         values = options
                             .iter()
                             .map(|o| o["value"].as_str().unwrap_or("").to_owned())
@@ -2057,7 +2152,11 @@ impl Ui {
             };
             self.detail.append(&widget);
             if let Some(info) = field["info"].as_str().filter(|i| !i.is_empty()) {
-                let info = gtk::Label::builder().label(info).xalign(0.).wrap(true).build();
+                let info = gtk::Label::builder()
+                    .label(info)
+                    .xalign(0.)
+                    .wrap(true)
+                    .build();
                 info.add_css_class("field-info");
                 self.detail.append(&info);
             }
@@ -2103,7 +2202,10 @@ impl Ui {
             } else if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
                 values.insert(id.clone(), json!(check.is_active()));
             } else if let Some(dropdown) = widget.downcast_ref::<gtk::DropDown>() {
-                let value = choices.get(dropdown.selected() as usize).cloned().unwrap_or_default();
+                let value = choices
+                    .get(dropdown.selected() as usize)
+                    .cloned()
+                    .unwrap_or_default();
                 values.insert(id.clone(), json!(value));
             }
         }
@@ -2116,7 +2218,10 @@ fn read_stream(stream: gio::InputStream, done: impl FnOnce(Vec<u8>) + 'static) {
     glib::spawn_future_local(async move {
         let mut bytes = Vec::new();
         loop {
-            match stream.read_bytes_future(64 * 1024, glib::Priority::DEFAULT).await {
+            match stream
+                .read_bytes_future(64 * 1024, glib::Priority::DEFAULT)
+                .await
+            {
                 Ok(chunk) if !chunk.is_empty() && bytes.len() < 4 * 1024 * 1024 => {
                     bytes.extend_from_slice(&chunk)
                 }
@@ -2164,32 +2269,36 @@ fn copy_file(clipboard: &gdk::Clipboard, path: &str) {
 fn show_hud(app: &adw::Application, text: &str) {
     let text = text.to_owned();
     let app = app.clone();
-    gio::bus_get(gio::BusType::Session, None::<&gio::Cancellable>, move |bus| {
-        let fallback = {
-            let (app, text) = (app.clone(), text.clone());
-            move || {
-                let notification = gio::Notification::new(&text);
-                app.send_notification(None, &notification);
-            }
-        };
-        let Ok(bus) = bus else { return fallback() };
-        bus.call(
-            Some("org.gnome.Shell"),
-            "/io/github/gnomelauncher/Shell",
-            "io.github.gnomelauncher.Shell",
-            "ShowHud",
-            Some(&(text.as_str(), "").to_variant()),
-            None,
-            gio::DBusCallFlags::NONE,
-            2000,
-            None::<&gio::Cancellable>,
-            move |result| {
-                if result.is_err() {
-                    fallback();
+    gio::bus_get(
+        gio::BusType::Session,
+        None::<&gio::Cancellable>,
+        move |bus| {
+            let fallback = {
+                let (app, text) = (app.clone(), text.clone());
+                move || {
+                    let notification = gio::Notification::new(&text);
+                    app.send_notification(None, &notification);
                 }
-            },
-        );
-    });
+            };
+            let Ok(bus) = bus else { return fallback() };
+            bus.call(
+                Some("org.gnome.Shell"),
+                "/io/github/gnomelauncher/Shell",
+                "io.github.gnomelauncher.Shell",
+                "ShowHud",
+                Some(&(text.as_str(), "").to_variant()),
+                None,
+                gio::DBusCallFlags::NONE,
+                2000,
+                None::<&gio::Cancellable>,
+                move |result| {
+                    if result.is_err() {
+                        fallback();
+                    }
+                },
+            );
+        },
+    );
 }
 
 fn section(kind: &Kind) -> &'static str {
@@ -2519,10 +2628,16 @@ mod tests {
                 settle(400);
                 let paintable = gtk::WidgetPaintable::new(Some(&ui.window));
                 let snapshot = gtk::Snapshot::new();
-                paintable.snapshot(&snapshot, ui.window.width() as f64, ui.window.height() as f64);
+                paintable.snapshot(
+                    &snapshot,
+                    ui.window.width() as f64,
+                    ui.window.height() as f64,
+                );
                 let node = snapshot.to_node().unwrap();
                 let texture = ui.window.renderer().unwrap().render_texture(&node, None);
-                texture.save_to_png(out.join(format!("{name}-{suffix}.png"))).unwrap();
+                texture
+                    .save_to_png(out.join(format!("{name}-{suffix}.png")))
+                    .unwrap();
             }
         }
         ui.hide();

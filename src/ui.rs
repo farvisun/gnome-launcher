@@ -2201,7 +2201,8 @@ fn result_row(item: &Item, favorite: bool, decor: &Value) -> gtk::Box {
         .ok()
         .map(|i| gtk::Image::from_gicon(&i))
         .unwrap_or_else(|| gtk::Image::from_icon_name("application-x-executable-symbolic"));
-    if item.icon.ends_with("-symbolic") {
+    // Symbolic icons may also be files an extension ships, named `*-symbolic.svg`.
+    if item.icon.ends_with("-symbolic") || item.icon.ends_with("-symbolic.svg") {
         // Symbolic glyphs sit on a soft tile so they line up with full-colour app icons.
         icon.set_pixel_size(16);
         icon.add_css_class("symbolic-tile");

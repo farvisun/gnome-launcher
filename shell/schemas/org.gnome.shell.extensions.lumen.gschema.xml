@@ -13,5 +13,9 @@
       <default>true</default>
       <summary>Show running Lumen timers in the top bar</summary>
     </key>
+    <key name="show-weather-indicator" type="b">
+      <default>false</default>
+      <summary>Show the weather from Lumen's Weather extension in the top bar</summary>
+    </key>
   </schema>
 </schemalist>

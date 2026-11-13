@@ -92,8 +92,13 @@ try:
         desktop.with_name(f'lumen-enter-check-{name.lower()}.desktop').write_text(
             f'[Desktop Entry]\nType=Application\nName=Lumen Enter Check {name}\n'
             f'Exec={shutil.which("touch")} {opened[name]}\nTerminal=false\n')
+    # Turn on the built-ins exercised below before the launcher reads its state.
+    state_file = Path(os.environ['XDG_DATA_HOME']) / 'gnome-launcher/state.json'
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps({'enabled_builtins': ['lumen.password-generator', 'lumen.weather'],
+                                      'preferences': {'lumen.weather': {'defaultquery': 'Berlin', 'clockformat': '24h'}}}))
     app_log = (ROOT / 'dist/shell-app.log').open('w')
-    app = subprocess.Popen([str(binary), '--background'], env=dict(os.environ, WAYLAND_DISPLAY='lumen-test', GDK_BACKEND='wayland', LUMEN_PROFILE='1'), stdout=app_log, stderr=subprocess.STDOUT)
+    app = subprocess.Popen([str(binary), '--background'], env=dict(os.environ, WAYLAND_DISPLAY='lumen-test', GDK_BACKEND='wayland', LUMEN_PROFILE='1', LUMEN_BUILTIN_DIR=str(ROOT / 'extensions')), stdout=app_log, stderr=subprocess.STDOUT)
     try:
         def invoke(destination, path, interface, method, signature='()', values=()):
             return bus.call_sync(destination, path, interface, method, GLib.Variant(signature, values), None, Gio.DBusCallFlags.NONE, 3000, None).unpack()
@@ -198,6 +203,47 @@ try:
         press(0xff8d)  # Keypad Enter activates the initial selection without navigation.
         wait_opened('Alpha', 'Keypad Enter')
         print('PASS: Enter launches the arrow-selected result; keypad Enter launches the initial selection')
+        def stage_has_text(text):
+            return shell_eval('''(() => {
+                const find = actor => actor.text === %s || actor.get_children().some(find);
+                return find(global.stage);
+            })()''' % json.dumps(text))
+        invoke('org.gnome.Shell', '/io/github/gnomelauncher/Shell', 'io.github.gnomelauncher.Shell', 'ShowHud', '(ss)', ('Smoke HUD', ''))
+        for _ in range(3): spin()
+        assert stage_has_text('Smoke HUD'), 'ShowHud did not draw the HUD'
+        print('PASS: the Shell draws HUD messages sent over D-Bus')
+        # A no-view command copies, closes Lumen and shows its HUD.
+        group.activate_action('run-command', GLib.Variant('s', 'lumen.password-generator/copy-random-password'))
+        deadline = time.monotonic() + 8
+        while not stage_has_text('Copied Password 🎉') and time.monotonic() < deadline: spin()
+        assert stage_has_text('Copied Password 🎉'), (ROOT / 'dist/shell-app.log').read_text()[-3000:]
+        for _ in range(5): spin()
+        assert not any(window['focused'] for window in palette_state()['windows']), 'A no-view command left the palette open'
+        copied = shell_eval('''new Promise(resolve => imports.gi.St.Clipboard.get_default()
+            .get_text(imports.gi.St.ClipboardType.CLIPBOARD, (_clipboard, text) => resolve(text)))''')
+        assert copied and len(copied) == 16, f'Clipboard holds {copied!r}, not a 16-character password'
+        print('PASS: a no-view command copies its password, closes Lumen and shows a HUD')
+        Gio.Settings.new_full(Gio.SettingsSchemaSource.new_from_directory(
+            str(Path(os.environ['XDG_DATA_HOME']) / 'gnome-shell/extensions' / UUID / 'schemas'),
+            Gio.SettingsSchemaSource.get_default(), False).lookup('org.gnome.shell.extensions.lumen', False),
+            None, None).set_boolean('show-weather-indicator', True)
+        weather = '''(async () => {
+            const Main = await import('resource:///org/gnome/shell/ui/main.js');
+            const button = Main.panel.statusArea['lumen-weather'];
+            return button ? {label: button._label.text, icon: button._icon.icon_name, items: button.menu._getMenuItems().length} : null;
+        })()'''
+        deadline = time.monotonic() + 30
+        state = None
+        while time.monotonic() < deadline:
+            state = shell_eval(weather)
+            if state and state['label']: break
+            spin()
+        assert state, 'The weather indicator did not appear in the top bar'
+        if state['label']:
+            assert '°C' in state['label'] and state['items'] > 10, state
+            print(f'PASS: the top bar shows the weather ({state["label"]}, {state["items"]} menu rows)')
+        else:
+            print(f'NOTE: the weather indicator appeared but wttr.in did not answer: {state}')
         control = subprocess.Popen([sys.executable, '-c', '''import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk

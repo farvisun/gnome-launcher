@@ -85,7 +85,7 @@ fn tile(item: &Value, width: i32, height: i32) -> gtk::Button {
         picture.set_vexpand(true);
         frame.append(&picture);
     } else {
-        let icon = gtk::Image::from_icon_name(media["icon"].as_str().unwrap_or("image-x-generic-symbolic"));
+        let icon = super::rich::icon(media["icon"].as_str().unwrap_or("image-x-generic-symbolic"));
         icon.set_pixel_size((height / 3).clamp(16, 48));
         icon.set_vexpand(true);
         icon.set_valign(gtk::Align::Center);

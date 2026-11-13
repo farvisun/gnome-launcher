@@ -4,7 +4,7 @@
   "type": "module",
   "workspaces": ["sdk"],
   "scripts": {
-    "test": "node --test sdk/test.mjs tests/shortcuts.test.mjs tests/timers-model.test.mjs extensions/timers/lib.test.mjs extensions/speedtest/lib.test.mjs extensions/port-manager/lib.test.mjs extensions/speedtest/views.test.mjs extensions/port-manager/views.test.mjs extensions/password-generator/lib.test.mjs",
+    "test": "node --test sdk/test.mjs tests/shortcuts.test.mjs tests/timers-model.test.mjs extensions/timers/lib.test.mjs extensions/speedtest/lib.test.mjs extensions/port-manager/lib.test.mjs extensions/speedtest/views.test.mjs extensions/port-manager/views.test.mjs extensions/password-generator/lib.test.mjs extensions/weather/lib.test.mjs extensions/weather/views.test.mjs tests/weather-model.test.mjs",
     "bundle:examples": "node sdk/cli.mjs build examples/quick-links dist/quick-links && node sdk/cli.mjs build examples/scratchpad dist/scratchpad"
   }
 }

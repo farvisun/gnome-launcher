@@ -15,6 +15,15 @@ pub(super) fn tint(widget: &impl IsA<gtk::Widget>, color: &Value) {
     }
 }
 
+/// An icon name, or the path of an image an extension ships (symbolic when
+/// named `*-symbolic.svg`, so it follows the text colour and tints).
+pub(super) fn icon(name: &str) -> gtk::Image {
+    match name.starts_with('/').then(|| gtk::gio::Icon::for_string(name).ok()).flatten() {
+        Some(icon) => gtk::Image::from_gicon(&icon),
+        None => gtk::Image::from_icon_name(name),
+    }
+}
+
 /// Tags without a colour get a neutral look.
 fn tag_tint(label: &gtk::Label, color: &Value) {
     if color.as_str().is_some_and(|c| COLORS.contains(&c)) {
@@ -60,7 +69,7 @@ fn accessory_widget(accessory: &Value) -> gtk::Widget {
     row.add_css_class("accessory");
     row.set_valign(gtk::Align::Center);
     if let Some(name) = accessory["icon"].as_str() {
-        let image = gtk::Image::from_icon_name(name);
+        let image = icon(name);
         image.set_pixel_size(14);
         tint(&image, &accessory["color"]);
         row.append(&image);

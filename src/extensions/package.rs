@@ -621,6 +621,7 @@ mod tests {
             "lumen.speedtest",
             "lumen.port-manager",
             "lumen.password-generator",
+            "lumen.weather",
         ] {
             assert!(found.iter().any(|e| e.manifest.id == id && e.builtin), "{id}");
         }

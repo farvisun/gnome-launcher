@@ -1,0 +1,24 @@
+{
+  "id": "lumen.weather",
+  "name": "Weather",
+  "version": "1.0.0",
+  "sdk_version": 1,
+  "entry": "index.mjs",
+  "description": "Current conditions and forecasts for any place, from wttr.in",
+  "capabilities": ["network", "storage"],
+  "preferences": [
+    {"name": "unitsystem", "type": "dropdown", "title": "Unit System", "description": "Metric (°C, km/h, mm) or Imperial (°F, mph, inches).", "default": "metric",
+     "data": [{"title": "Metric", "value": "metric"}, {"title": "Imperial", "value": "imperial"}]},
+    {"name": "defaultquery", "type": "textfield", "title": "Default Location", "description": "Shown when the search is empty. Leave empty to use your current location (from your IP address).", "default": ""},
+    {"name": "clockformat", "type": "dropdown", "title": "Clock Format", "description": "How sunrise, sunset and hourly times are shown.", "default": "12h",
+     "data": [{"title": "12 Hour", "value": "12h"}, {"title": "24 Hour", "value": "24h"}]},
+    {"name": "showmenuicon", "type": "checkbox", "title": "Top Bar", "label": "Show the weather icon in the top bar", "description": "Used by the top-bar weather.", "default": true},
+    {"name": "showmenutext", "type": "checkbox", "title": "Top Bar", "label": "Show the temperature in the top bar", "description": "Used by the top-bar weather.", "default": true},
+    {"name": "menutemperature", "type": "dropdown", "title": "Top Bar Temperature", "description": "Which temperature the top bar shows.", "default": "actual",
+     "data": [{"title": "Actual", "value": "actual"}, {"title": "Feels Like", "value": "feelslike"}]}
+  ],
+  "commands": [
+    {"id": "index", "title": "Show Weather", "subtitle": "Weather", "icon": "weather-few-clouds-symbolic",
+     "keywords": ["weather", "forecast", "temperature", "rain", "wttr"]}
+  ]
+}

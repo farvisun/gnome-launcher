@@ -33,6 +33,7 @@ Press **Super + Space**, type a few letters and press **Enter**. Lumen opens app
   - **Timers:** countdowns that ring even when Lumen is closed, stopwatches, and a top-bar countdown.
   - **Speedtest:** download, upload and ping through speed.cloudflare.com.
   - **Port Manager:** see and stop the programs listening on ports.
+  - **Weather:** current conditions and a three-day forecast for any place from wttr.in, with an hourly view for each day and, if you like, the weather in the top bar.
   - **Password Generator:** random passwords of 5–64 characters, or memorable ones such as `{word:capitalize}-{number:4}{symbol}`. *Copy Random Password* puts one on the clipboard without opening anything.
 - **Extensions.** Add your own commands, written in JavaScript or TypeScript.
 - **Private.** Your searches are never saved or sent anywhere. No account, no telemetry.

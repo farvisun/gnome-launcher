@@ -358,7 +358,10 @@ pub fn validate_view(view: &Value) -> Result<()> {
                     optional_text(&item["tooltip"], 300, "tooltip")?;
                     let content = &item["content"];
                     optional_color(&content["tint"])?;
-                    optional_text(&content["icon"], 100, "grid icon")?;
+                    optional_text(&content["icon"], 1000, "grid icon")?;
+                    if let Some(icon) = content["icon"].as_str().filter(|i| i.starts_with('/')) {
+                        valid_image(icon)?;
+                    }
                     if let Some(image) = content["image"].as_str() {
                         valid_image(image)?;
                     } else {
@@ -508,6 +511,9 @@ fn validate_decoration(item: &Value) -> Result<()> {
             optional_text(&accessory["text"], 100, "accessory text")?;
             optional_text(&accessory["tag"], 60, "accessory tag")?;
             optional_text(&accessory["tooltip"], 300, "accessory tooltip")?;
+            if let Some(icon) = accessory["icon"].as_str().filter(|i| i.starts_with('/')) {
+                valid_image(icon)?;
+            }
             optional_color(&accessory["color"])?;
         }
     }

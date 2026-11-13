@@ -9,6 +9,7 @@ import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extension
 import {changedBindings, shouldRestore} from './shortcuts.js';
 import {Hud} from './hud.js';
 import {TimerTray} from './timers.js';
+import {WeatherTray} from './weather.js';
 
 const APP = 'io.github.gnomelauncher.Launcher';
 const PATH = '/io/github/gnomelauncher/Launcher';
@@ -69,6 +70,13 @@ export default class Lumen extends Extension {
         this._timers = new TimerTray(this._settings,
             target => this._activate('run-command', [new GLib.Variant('s', target)]));
         this._hud = new Hud();
+        this._weather = new WeatherTray(this._settings, {
+            // A day opens straight into its hourly forecast, through the launch context.
+            open: day => this._activate('run-command',
+                [new GLib.Variant('s', `lumen.weather/index${day ? `#${JSON.stringify({day})}` : ''}`)]),
+            settings: () => this._activate('settings', []),
+            url: url => Gio.AppInfo.launch_default_for_uri(url, global.create_app_launch_context(0, -1)),
+        });
     }
     _animateIn(actor) {
         actor.remove_all_transitions();
@@ -204,6 +212,8 @@ export default class Lumen extends Extension {
         this._timers = null;
         this._hud?.destroy();
         this._hud = null;
+        this._weather?.destroy();
+        this._weather = null;
         if (this._changed) this._settings.disconnect(this._changed);
         if (this._ownerWatch) Gio.bus_unwatch_name(this._ownerWatch);
         if (this._created) global.display.disconnect(this._created);

@@ -1,0 +1,12 @@
+{
+  "id": "lumen.speedtest",
+  "name": "Speedtest",
+  "version": "1.0.0",
+  "sdk_version": 1,
+  "entry": "index.mjs",
+  "description": "Measure download, upload, ping and jitter with speed.cloudflare.com",
+  "capabilities": ["network", "clipboard", "storage", "open"],
+  "commands": [
+    {"id": "run", "title": "Run Speed Test", "icon": "network-transmit-receive-symbolic", "keywords": ["speedtest", "internet", "bandwidth", "download", "upload", "ping"]}
+  ]
+}
